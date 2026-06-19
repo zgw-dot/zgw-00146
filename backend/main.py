@@ -278,6 +278,38 @@ def _check_road_close_conflict(db: Session, road: str,
         )
 
 
+def _check_vehicle_time_conflict(db: Session, vehicle_id: Optional[int],
+                                 start: datetime, end: datetime,
+                                 exclude_order_id: Optional[int] = None):
+    if vehicle_id is None or not start or not end:
+        return
+    if end <= start:
+        raise HTTPException(status_code=400, detail="封路结束时间必须晚于开始时间")
+
+    q = db.query(WorkOrder).filter(
+        WorkOrder.vehicle_id == vehicle_id,
+        WorkOrder.status.in_([OrderStatus.ASSIGNED, OrderStatus.IN_PROGRESS, OrderStatus.PENDING_REVIEW]),
+        WorkOrder.road_close_start.isnot(None),
+        WorkOrder.road_close_end.isnot(None),
+        or_(
+            and_(WorkOrder.road_close_start <= start, start < WorkOrder.road_close_end),
+            and_(WorkOrder.road_close_start < end, end <= WorkOrder.road_close_end),
+            and_(start <= WorkOrder.road_close_start, WorkOrder.road_close_end <= end),
+        ),
+    )
+    if exclude_order_id is not None:
+        q = q.filter(WorkOrder.id != exclude_order_id)
+    conflict = q.first()
+    if conflict:
+        v = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+        v_info = f"{v.plate}（ID={vehicle_id}）" if v else f"ID={vehicle_id}"
+        raise HTTPException(
+            status_code=409,
+            detail=f"车辆排班冲突：车辆 {v_info} 在 {conflict.road_close_start} ~ {conflict.road_close_end} "
+                   f"已被工单 {conflict.order_no} 占用，与请求窗口 {start} ~ {end} 重叠",
+        )
+
+
 # ---------- APIs ----------
 
 @app.on_event("startup")
@@ -390,6 +422,8 @@ def assign_order(order_id: int, data: OrderAssignIn,
                               exclude_order_id=o.id)
     _check_road_close_conflict(db, o.road, data.road_close_start, data.road_close_end,
                                 exclude_order_id=o.id)
+    _check_vehicle_time_conflict(db, data.vehicle_id, data.road_close_start, data.road_close_end,
+                                 exclude_order_id=o.id)
 
     old_status = o.status
     note_suffix = "改派" if is_reassign else "派工"
