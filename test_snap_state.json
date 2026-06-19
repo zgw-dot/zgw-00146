@@ -1,0 +1,79 @@
+{
+  "order_a_no": "WO202606200128364F35",
+  "order_b_no": "WO202606200128362099",
+  "order_a_id": 1,
+  "order_b_id": 2,
+  "snap_hash_before": "5f761090ba012ba0",
+  "snap_before_orders": [
+    {
+      "id": 1,
+      "order_no": "WO202606200128364F35",
+      "road": "快照测试路A",
+      "tree_no": "SNAP-A-1781890116",
+      "risk_level": "中",
+      "suggested_time": "",
+      "need_road_close": "是",
+      "description": "快照恢复测试工单A",
+      "status": "待派工",
+      "reporter": "巡查员老张",
+      "reported_at": "2026-06-19T17:28:36.507509",
+      "team": "",
+      "vehicle": "",
+      "road_close_start": "",
+      "road_close_end": "",
+      "assigned_at": "",
+      "started_at": "",
+      "submitted_at": "",
+      "reviewed_at": "",
+      "review_note": "",
+      "cancelled_at": "",
+      "cancel_reason": "",
+      "history_count": 1,
+      "histories": [
+        {
+          "from": "",
+          "to": "待派工",
+          "operator": "巡查员老张",
+          "note": "巡查员上报工单",
+          "at": "2026-06-19T17:28:36.510778"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "order_no": "WO202606200128362099",
+      "road": "快照测试路B",
+      "tree_no": "SNAP-B-1781890116",
+      "risk_level": "高",
+      "suggested_time": "",
+      "need_road_close": "否",
+      "description": "快照恢复测试工单B",
+      "status": "待派工",
+      "reporter": "巡查员老张",
+      "reported_at": "2026-06-19T17:28:36.532248",
+      "team": "",
+      "vehicle": "",
+      "road_close_start": "",
+      "road_close_end": "",
+      "assigned_at": "",
+      "started_at": "",
+      "submitted_at": "",
+      "reviewed_at": "",
+      "review_note": "",
+      "cancelled_at": "",
+      "cancel_reason": "",
+      "history_count": 1,
+      "histories": [
+        {
+          "from": "",
+          "to": "待派工",
+          "operator": "巡查员老张",
+          "note": "巡查员上报工单",
+          "at": "2026-06-19T17:28:36.535794"
+        }
+      ]
+    }
+  ],
+  "snap_before_version": "1.0.0",
+  "imported_new_no": "WO_IMPORT_NEW_001"
+}

@@ -114,6 +114,19 @@ class WorkOrder(Base):
                              cascade="all, delete-orphan", lazy="selectin")
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(50), nullable=False, index=True)
+    operator_id = Column(Integer, nullable=False)
+    operator_name = Column(String(100))
+    target_type = Column(String(50))
+    target_id = Column(String(100))
+    detail = Column(Text)
+    snapshot_version = Column(String(30))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class StatusHistory(Base):
     __tablename__ = "status_histories"
     id = Column(Integer, primary_key=True, index=True)

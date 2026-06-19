@@ -301,6 +301,162 @@
     border-radius: 10px;
     box-shadow: 0 2px 6px rgba(0,0,0,.05);
   }
+
+  /* ===== Snapshot Import ===== */
+  .snap-step-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: 18px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e4e8ef;
+  }
+  .snap-step {
+    flex: 1;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    background: #f9fafc;
+    color: #8893a7;
+    border-right: 1px solid #e4e8ef;
+    position: relative;
+  }
+  .snap-step:last-child { border-right: none; }
+  .snap-step.active { background: #2f8f5f; color: #fff; }
+  .snap-step.done { background: #e8f5e9; color: #2f8f5f; }
+  .snap-step .step-num {
+    display: inline-block;
+    width: 20px; height: 20px;
+    line-height: 20px;
+    border-radius: 50%;
+    background: rgba(0,0,0,.08);
+    font-size: 11px;
+    margin-right: 6px;
+  }
+  .snap-step.active .step-num { background: rgba(255,255,255,.25); }
+  .snap-step.done .step-num { background: #2f8f5f; color: #fff; }
+
+  .snap-upload-zone {
+    border: 2px dashed #c5cdd8;
+    border-radius: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    background: #fafbfd;
+  }
+  .snap-upload-zone:hover { border-color: #2f8f5f; background: #f0faf4; }
+  .snap-upload-zone.dragover { border-color: #2f8f5f; background: #e8f5e9; }
+  .snap-upload-zone .upload-icon { font-size: 36px; color: #8893a7; margin-bottom: 8px; }
+  .snap-upload-zone p { margin: 4px 0; font-size: 13px; color: #5a6780; }
+  .snap-upload-zone .hint { font-size: 11.5px; color: #8893a7; }
+
+  .snap-meta-bar {
+    display: flex;
+    gap: 16px;
+    padding: 10px 14px;
+    background: #f0faf4;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    color: #445068;
+    flex-wrap: wrap;
+  }
+  .snap-meta-bar .mk { color: #8893a7; margin-right: 4px; }
+
+  .snap-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .snap-tbl th {
+    background: #f4f6fa;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: #445068;
+    border-bottom: 2px solid #e4e8ef;
+    white-space: nowrap;
+  }
+  .snap-tbl td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #eef1f6;
+    vertical-align: top;
+  }
+  .snap-tbl tr:hover td { background: #fafbfd; }
+  .snap-tbl .cb-col { width: 32px; text-align: center; }
+  .snap-tbl input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+  .snap-decision-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .snap-decision-ok { background: #d5f0e2; color: #1d7c4c; }
+  .snap-decision-overwrite_or_skip { background: #fff3cd; color: #856404; }
+  .snap-decision-skip { background: #e8ecef; color: #5a6780; }
+  .snap-decision-reject { background: #fad4d3; color: #a9312e; }
+
+  .snap-conflict-list {
+    margin: 3px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .snap-conflict-list li {
+    font-size: 11.5px;
+    color: #5a6780;
+    padding: 2px 0;
+    line-height: 1.4;
+  }
+  .snap-conflict-list li::before { content: "⚠ "; color: #e67e22; }
+  .snap-conflict-list li.reject-item::before { content: "✕ "; color: #d9534f; }
+
+  .snap-result-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .snap-result-create { background: #d5f0e2; color: #1d7c4c; }
+  .snap-result-overwrite { background: #fff3cd; color: #856404; }
+  .snap-result-skip { background: #e8ecef; color: #5a6780; }
+  .snap-result-reject { background: #fad4d3; color: #a9312e; }
+  .snap-result-error { background: #fad4d3; color: #a9312e; }
+
+  .snap-summary {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .snap-summary .ss-item {
+    background: #f4f6fa;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .snap-summary .ss-item .ss-num { font-weight: 700; font-size: 18px; }
+  .snap-summary .ss-item .ss-label { color: #8893a7; font-size: 11.5px; }
+
+  .snap-tbl-wrap {
+    max-height: 340px;
+    overflow: auto;
+    border: 1px solid #eef1f6;
+    border-radius: 8px;
+  }
+
+  .snap-user-select {
+    padding: 5px 8px;
+    border: 1px solid #d7dde7;
+    border-radius: 4px;
+    font-size: 12px;
+    background: #f9fafc;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -321,6 +477,7 @@
     </select>
     <button class="btn btn-ghost" onclick="exportCsv()">⬇ 导出 CSV</button>
     <button class="btn btn-ghost" onclick="exportJson()">⬇ 导出 JSON</button>
+    <button class="btn btn-ghost" id="btnSnapRestore" onclick="openSnapshotModal()" style="display:none;">📦 快照恢复</button>
   </div>
 </header>
 
@@ -449,6 +606,15 @@
   </div>
 </div>
 
+<!-- 快照恢复 Modal -->
+<div class="modal-mask" id="snapshotModal">
+  <div class="modal" style="max-width:880px;">
+    <header><h2>📦 工单快照恢复</h2></header>
+    <div class="modal-body" id="snapshotBody" style="min-height:200px;"></div>
+    <div class="modal-footer" id="snapshotFooter"></div>
+  </div>
+</div>
+
 <div id="toast-wrap"></div>
 
 <script>
@@ -518,11 +684,13 @@ async function onRoleChange() {
       state.currentUser = await api("/me");
       $id("userInfo").textContent = `当前身份：${state.currentUser.name}（${state.currentUser.role === "admin" ? "管理员" : "巡查员"}）`;
       $id("btnReport").style.display = state.currentUser.role === "inspector" ? "inline-block" : "none";
+      $id("btnSnapRestore").style.display = state.currentUser.role === "admin" ? "inline-block" : "none";
     } catch (e) {}
   } else {
     state.currentUser = null;
     $id("userInfo").textContent = "未登录";
     $id("btnReport").style.display = "none";
+    $id("btnSnapRestore").style.display = "none";
   }
   await loadAll();
 }
@@ -823,6 +991,310 @@ function exportCsv() {
 function exportJson() {
   if (!state.currentUserId) { toast("请先登录", "err"); return; }
   downloadWithAuth("/export/json", "work_orders.json");
+}
+
+// ---------- snapshot restore ----------
+const snapState = {
+  step: 1,
+  fileData: null,
+  precheckResult: null,
+  importResult: null,
+};
+
+function openSnapshotModal() {
+  if (!state.currentUser || state.currentUser.role !== "admin") {
+    toast("只有管理员可执行快照恢复", "err"); return;
+  }
+  snapState.step = 1;
+  snapState.fileData = null;
+  snapState.precheckResult = null;
+  snapState.importResult = null;
+  renderSnapshotStep();
+  openModal("snapshotModal");
+}
+
+function renderStepBar(current) {
+  const steps = [
+    { n: 1, label: "上传快照" },
+    { n: 2, label: "预检冲突" },
+    { n: 3, label: "确认恢复" },
+    { n: 4, label: "恢复结果" },
+  ];
+  return `<div class="snap-step-bar">${steps.map(s => {
+    let cls = s.n < current ? "done" : s.n === current ? "active" : "";
+    return `<div class="snap-step ${cls}"><span class="step-num">${s.n < current ? "✓" : s.n}</span>${s.label}</div>`;
+  }).join("")}</div>`;
+}
+
+function renderSnapshotStep() {
+  const body = $id("snapshotBody");
+  const footer = $id("snapshotFooter");
+  switch (snapState.step) {
+    case 1: renderSnapStep1(body, footer); break;
+    case 2: renderSnapStep2(body, footer); break;
+    case 3: renderSnapStep3(body, footer); break;
+    case 4: renderSnapStep4(body, footer); break;
+  }
+}
+
+function renderSnapStep1(body, footer) {
+  body.innerHTML = renderStepBar(1) + `
+    <div class="snap-upload-zone" id="snapDropZone" onclick="$id('snapFileInput').click()">
+      <div class="upload-icon">📁</div>
+      <p>点击选择或拖拽 JSON 快照文件到此处</p>
+      <p class="hint">仅支持本系统导出的 .json 快照文件</p>
+    </div>
+    <input type="file" id="snapFileInput" accept=".json" style="display:none;" onchange="onSnapFileSelect(event)" />
+  `;
+  footer.innerHTML = `<button class="btn btn-ghost" onclick="closeModal('snapshotModal')">取消</button>`;
+
+  const zone = $id("snapDropZone");
+  zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+  zone.addEventListener("drop", e => {
+    e.preventDefault(); zone.classList.remove("dragover");
+    if (e.dataTransfer.files.length) onSnapFileLoad(e.dataTransfer.files[0]);
+  });
+}
+
+function onSnapFileSelect(e) {
+  if (e.target.files.length) onSnapFileLoad(e.target.files[0]);
+}
+
+function onSnapFileLoad(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.orders || !Array.isArray(data.orders)) {
+        toast("无效的快照文件：缺少 orders 字段", "err"); return;
+      }
+      snapState.fileData = data;
+      snapState.step = 2;
+      renderSnapshotStep();
+    } catch (err) {
+      toast("JSON 解析失败：" + err.message, "err");
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function renderSnapStep2(body, footer) {
+  body.innerHTML = renderStepBar(2) + `<div style="text-align:center;padding:30px;color:#8893a7;">正在预检冲突分析…</div>`;
+  footer.innerHTML = "";
+
+  try {
+    const result = await api("/snapshot/precheck", "POST", { orders: snapState.fileData.orders });
+    snapState.precheckResult = result;
+    snapState.step = 2;
+    renderPrecheckTable(body, footer);
+  } catch (e) {
+    body.innerHTML = renderStepBar(2) + `<div style="color:#d9534f;padding:20px;">预检失败：${e.message}</div>`;
+    footer.innerHTML = `<button class="btn btn-ghost" onclick="snapState.step=1;renderSnapshotStep();">返回</button>`;
+  }
+}
+
+function renderPrecheckTable(body, footer) {
+  const r = snapState.precheckResult;
+  const d = snapState.fileData;
+  let metaHtml = `<div class="snap-meta-bar">`;
+  metaHtml += `<div><span class="mk">版本：</span>${d.snapshot_version || "未知"}</div>`;
+  metaHtml += `<div><span class="mk">导出时间：</span>${fmtTime(d.exported_at) || "未知"}</div>`;
+  if (d.exported_by) metaHtml += `<div><span class="mk">操作人：</span>${d.exported_by.name || "-"}</div>`;
+  metaHtml += `<div><span class="mk">工单总数：</span>${r.total}</div>`;
+  metaHtml += `</div>`;
+
+  const okCount = r.items.filter(i => i.decision === "ok").length;
+  const owCount = r.items.filter(i => i.decision === "overwrite_or_skip").length;
+  const skipCount = r.items.filter(i => i.decision === "skip").length;
+  const rejectCount = r.items.filter(i => i.decision === "reject").length;
+
+  let summaryHtml = `<div class="snap-summary">
+    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${okCount}</div><div class="ss-label">可新建</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#856404;">${owCount}</div><div class="ss-label">可覆盖</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#5a6780;">${skipCount}</div><div class="ss-label">将跳过</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#a9312e;">${rejectCount}</div><div class="ss-label">将拒绝</div></div>
+  </div>`;
+
+  let tblHtml = `<div class="snap-tbl-wrap"><table class="snap-tbl">
+    <thead><tr>
+      <th class="cb-col"><input type="checkbox" id="snapCbAll" checked onchange="snapToggleAll(this)" /></th>
+      <th>工单号</th><th>路段</th><th>状态</th><th>队伍/车辆</th><th>预检结果</th><th>冲突详情</th>
+    </tr></thead><tbody>`;
+
+  r.items.forEach((item, idx) => {
+    const decCls = `snap-decision-${item.decision}`;
+    const decLabel = { ok: "可新建", overwrite_or_skip: "可覆盖", skip: "跳过", reject: "拒绝" }[item.decision] || item.decision;
+    const conflictHtml = item.conflicts.length === 0 ? '<span style="color:#8893a7;">无冲突</span>' :
+      `<ul class="snap-conflict-list">${item.conflicts.map(c =>
+        `<li class="${c.action === "reject" ? "reject-item" : ""}">${c.message}</li>`
+      ).join("")}</ul>`;
+
+    tblHtml += `<tr>
+      <td class="cb-col"><input type="checkbox" class="snap-cb" data-idx="${idx}" ${item.decision === "reject" || item.decision === "skip" ? "" : "checked"} /></td>
+      <td><strong>${item.order_no}</strong></td>
+      <td>${item.road}</td>
+      <td>${item.status}</td>
+      <td>${item.team || "-"} / ${item.vehicle || "-"}</td>
+      <td><span class="snap-decision-tag ${decCls}">${decLabel}</span></td>
+      <td>${conflictHtml}</td>
+    </tr>`;
+  });
+
+  tblHtml += `</tbody></table></div>`;
+
+  body.innerHTML = renderStepBar(2) + metaHtml + summaryHtml + tblHtml;
+  footer.innerHTML = `
+    <button class="btn btn-ghost" onclick="snapState.step=1;renderSnapshotStep();">返回</button>
+    <button class="btn btn-secondary" onclick="goSnapStep3()">选择并恢复</button>
+  `;
+}
+
+function snapToggleAll(cb) {
+  document.querySelectorAll(".snap-cb").forEach(c => c.checked = cb.checked);
+}
+
+function goSnapStep3() {
+  snapState.step = 3;
+  renderSnapshotStep();
+}
+
+function renderSnapStep3(body, footer) {
+  const r = snapState.precheckResult;
+  const checkedIndices = [];
+  document.querySelectorAll(".snap-cb:checked").forEach(cb => {
+    checkedIndices.push(parseInt(cb.dataset.idx));
+  });
+
+  if (checkedIndices.length === 0) {
+    toast("请至少勾选一条工单进行恢复", "err"); return;
+  }
+
+  let html = renderStepBar(3);
+  html += `<p style="font-size:13px;color:#5a6780;margin-bottom:12px;">即将恢复以下 <strong>${checkedIndices.length}</strong> 条工单。对于重复工单号，您可以为每条选择操作方式：</p>`;
+  html += `<div class="snap-tbl-wrap"><table class="snap-tbl">
+    <thead><tr><th>工单号</th><th>路段</th><th>快照状态</th><th>冲突</th><th>操作选择</th></tr></thead><tbody>`;
+
+  checkedIndices.forEach(idx => {
+    const item = r.items[idx];
+    const hasDuplicate = item.conflicts.some(c => c.type === "duplicate_order_no" || c.type === "duplicate_overwritable");
+    const isReject = item.decision === "reject";
+    const isSkip = item.decision === "skip";
+
+    let selectHtml;
+    if (isReject) {
+      selectHtml = `<span style="color:#a9312e;font-size:12px;">存在不可恢复冲突，将拒绝</span>`;
+    } else if (isSkip) {
+      selectHtml = `<select class="snap-user-select" data-order="${item.order_no}">
+        <option value="skip">跳过（推荐）</option>
+        <option value="overwrite">强制覆盖</option>
+      </select>`;
+    } else if (hasDuplicate) {
+      selectHtml = `<select class="snap-user-select" data-order="${item.order_no}">
+        <option value="overwrite_or_skip">覆盖（推荐）</option>
+        <option value="skip">跳过</option>
+      </select>`;
+    } else {
+      selectHtml = `<span style="color:#1d7c4c;font-size:12px;">新建（无冲突）</span>`;
+    }
+
+    const conflictBrief = item.conflicts.length === 0 ? "无" :
+      item.conflicts.map(c => c.type === "duplicate_order_no" ? "重复工单号" :
+        c.type === "status_regression" ? "状态倒退" :
+        c.type === "completed_record" ? "已完成禁止覆盖" :
+        c.type === "cancelled_record" ? "已撤销禁止覆盖" :
+        c.type === "terminal_status_new" ? "终态记录" :
+        c.type === "team_time_conflict" ? "队伍时间冲突" :
+        c.type === "vehicle_time_conflict" ? "车辆排班冲突" :
+        c.type === "road_close_conflict" ? "封路窗口冲突" :
+        c.type).join("、");
+
+    html += `<tr>
+      <td><strong>${item.order_no}</strong></td>
+      <td>${item.road}</td>
+      <td>${item.status}</td>
+      <td style="font-size:12px;color:#5a6780;">${conflictBrief}</td>
+      <td>${selectHtml}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  html += `<div style="margin-top:14px;padding:10px 14px;background:#fff8e1;border-radius:6px;font-size:12.5px;color:#856404;">
+    ⚠ 恢复操作将写入数据库，建议先导出当前快照作为备份。覆盖操作会替换现有工单数据及状态历史。
+  </div>`;
+
+  body.innerHTML = html;
+  footer.innerHTML = `
+    <button class="btn btn-ghost" onclick="snapState.step=2;renderSnapshotStep();">返回预检</button>
+    <button class="btn btn-danger" onclick="doSnapImport()">确认恢复</button>
+  `;
+}
+
+async function doSnapImport() {
+  const r = snapState.precheckResult;
+  const d = snapState.fileData;
+
+  const selected = [];
+  document.querySelectorAll(".snap-cb:checked").forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const item = r.items[idx];
+    const selEl = document.querySelector(`.snap-user-select[data-order="${item.order_no}"]`);
+    const decision = selEl ? selEl.value : item.decision;
+    selected.push({ order_no: item.order_no, decision });
+  });
+
+  const body = $id("snapshotBody");
+  const footer = $id("snapshotFooter");
+  body.innerHTML = renderStepBar(4) + `<div style="text-align:center;padding:30px;color:#8893a7;">正在执行恢复…</div>`;
+  footer.innerHTML = "";
+
+  try {
+    const result = await api("/snapshot/import", "POST", {
+      snapshot_version: d.snapshot_version,
+      exported_at: d.exported_at,
+      exported_by: d.exported_by,
+      orders: d.orders,
+      selected,
+    });
+    snapState.importResult = result;
+    snapState.step = 4;
+    renderSnapStep4(body, footer);
+    loadAll();
+  } catch (e) {
+    body.innerHTML = renderStepBar(4) + `<div style="color:#d9534f;padding:20px;">恢复失败：${e.message}</div>`;
+    footer.innerHTML = `<button class="btn btn-ghost" onclick="closeModal('snapshotModal')">关闭</button>`;
+  }
+}
+
+function renderSnapStep4(body, footer) {
+  const r = snapState.importResult;
+
+  let summaryHtml = `<div class="snap-summary">
+    <div class="ss-item"><div class="ss-num">${r.total}</div><div class="ss-label">总计</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${r.imported}</div><div class="ss-label">成功</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#5a6780;">${r.skipped}</div><div class="ss-label">跳过</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#a9312e;">${r.rejected}</div><div class="ss-label">拒绝</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${r.failed}</div><div class="ss-label">失败</div></div>
+  </div>`;
+
+  let tblHtml = `<div class="snap-tbl-wrap"><table class="snap-tbl">
+    <thead><tr><th>工单号</th><th>操作</th><th>成功</th><th>原因</th></tr></thead><tbody>`;
+
+  r.items.forEach(item => {
+    const actionMap = { create: "新建", overwrite: "覆盖", skip: "跳过", reject: "拒绝", error: "异常" };
+    const clsMap = { create: "snap-result-create", overwrite: "snap-result-overwrite", skip: "snap-result-skip", reject: "snap-result-reject", error: "snap-result-error" };
+    tblHtml += `<tr>
+      <td><strong>${item.order_no}</strong></td>
+      <td><span class="snap-result-tag ${clsMap[item.action] || ""}">${actionMap[item.action] || item.action}</span></td>
+      <td>${item.success ? "✅" : "❌"}</td>
+      <td style="font-size:12px;color:#5a6780;max-width:360px;">${item.reason || "-"}</td>
+    </tr>`;
+  });
+
+  tblHtml += `</tbody></table></div>`;
+
+  body.innerHTML = renderStepBar(4) + summaryHtml + tblHtml;
+  footer.innerHTML = `<button class="btn btn-primary" onclick="closeModal('snapshotModal');loadAll();">完成</button>`;
 }
 
 // ---------- modal helpers ----------
