@@ -890,6 +890,7 @@ class SnapshotImportOut(BaseModel):
     skipped: int
     rejected: int
     failed: int
+    not_selected: int = 0
     items: List[SnapshotImportItemOut]
 
 
@@ -900,6 +901,7 @@ def snapshot_import(data: SnapshotImportIn,
     _require_role(user, Role.ADMIN)
 
     selected_map = {}
+    has_user_selection = bool(data.selected)
     if data.selected:
         for s in data.selected:
             selected_map[s.order_no] = s.decision
@@ -909,28 +911,30 @@ def snapshot_import(data: SnapshotImportIn,
     skipped_count = 0
     rejected_count = 0
     failed_count = 0
+    not_selected_count = 0
 
     for item in data.orders:
         order_no = item.get("order_no", "")
+
+        if has_user_selection and order_no not in selected_map:
+            not_selected_count += 1
+            results.append(SnapshotImportItemOut(
+                order_no=order_no, action="not_selected", success=False,
+                reason="未勾选，不执行恢复",
+            ))
+            continue
+
         conflicts = _detect_conflicts(item, db)
         auto_decision = _resolve_decision(conflicts)
 
-        user_decision = selected_map.get(order_no)
-        if user_decision:
-            if user_decision == "skip":
-                skipped_count += 1
-                results.append(SnapshotImportItemOut(
-                    order_no=order_no, action="skip", success=True,
-                    reason="用户选择跳过",
-                ))
-                continue
-            elif user_decision == "reject":
-                rejected_count += 1
-                results.append(SnapshotImportItemOut(
-                    order_no=order_no, action="reject", success=True,
-                    reason="用户选择拒绝",
-                ))
-                continue
+        user_decision = selected_map.get(order_no) if has_user_selection else None
+        if user_decision == "skip":
+            skipped_count += 1
+            results.append(SnapshotImportItemOut(
+                order_no=order_no, action="skip", success=True,
+                reason="用户选择跳过",
+            ))
+            continue
 
         decision = user_decision or auto_decision
 
@@ -1273,6 +1277,7 @@ def snapshot_import(data: SnapshotImportIn,
     audit_detail = (
         f"导入完成: 总={len(data.orders)}, 成功={imported_count}, "
         f"跳过={skipped_count}, 拒绝={rejected_count}, 失败={failed_count}"
+        f", 未勾选={not_selected_count}"
     )
     if detail_parts:
         audit_detail += "; 失败详情: " + "; ".join(detail_parts[:10])
@@ -1295,6 +1300,7 @@ def snapshot_import(data: SnapshotImportIn,
         skipped=skipped_count,
         rejected=rejected_count,
         failed=failed_count,
+        not_selected=not_selected_count,
         items=results,
     )
 

@@ -1,0 +1,10 @@
+{
+  "vehicle_id": 1,
+  "vehicle_plate": "京A·12345",
+  "team_a": 1,
+  "team_b": 2,
+  "order_a_id": 4,
+  "order_b_id": 5,
+  "b_init_hist": 1,
+  "bug_reproduced": false
+}

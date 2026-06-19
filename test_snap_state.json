@@ -1,22 +1,22 @@
 {
-  "order_a_no": "WO202606200128364F35",
-  "order_b_no": "WO202606200128362099",
+  "order_a_no": "WO20260620022608B82E",
+  "order_b_no": "WO202606200226089836",
   "order_a_id": 1,
   "order_b_id": 2,
-  "snap_hash_before": "5f761090ba012ba0",
+  "snap_hash_before": "d9cc1ad5fe830999",
   "snap_before_orders": [
     {
       "id": 1,
-      "order_no": "WO202606200128364F35",
+      "order_no": "WO20260620022608B82E",
       "road": "快照测试路A",
-      "tree_no": "SNAP-A-1781890116",
+      "tree_no": "SNAP-A-1781893568",
       "risk_level": "中",
       "suggested_time": "",
       "need_road_close": "是",
       "description": "快照恢复测试工单A",
       "status": "待派工",
       "reporter": "巡查员老张",
-      "reported_at": "2026-06-19T17:28:36.507509",
+      "reported_at": "2026-06-19T18:26:08.946538",
       "team": "",
       "vehicle": "",
       "road_close_start": "",
@@ -35,22 +35,22 @@
           "to": "待派工",
           "operator": "巡查员老张",
           "note": "巡查员上报工单",
-          "at": "2026-06-19T17:28:36.510778"
+          "at": "2026-06-19T18:26:08.949292"
         }
       ]
     },
     {
       "id": 2,
-      "order_no": "WO202606200128362099",
+      "order_no": "WO202606200226089836",
       "road": "快照测试路B",
-      "tree_no": "SNAP-B-1781890116",
+      "tree_no": "SNAP-B-1781893568",
       "risk_level": "高",
       "suggested_time": "",
       "need_road_close": "否",
       "description": "快照恢复测试工单B",
       "status": "待派工",
       "reporter": "巡查员老张",
-      "reported_at": "2026-06-19T17:28:36.532248",
+      "reported_at": "2026-06-19T18:26:08.963941",
       "team": "",
       "vehicle": "",
       "road_close_start": "",
@@ -69,7 +69,7 @@
           "to": "待派工",
           "operator": "巡查员老张",
           "note": "巡查员上报工单",
-          "at": "2026-06-19T17:28:36.535794"
+          "at": "2026-06-19T18:26:08.965568"
         }
       ]
     }

@@ -1275,14 +1275,15 @@ function renderSnapStep4(body, footer) {
     <div class="ss-item"><div class="ss-num" style="color:#5a6780;">${r.skipped}</div><div class="ss-label">跳过</div></div>
     <div class="ss-item"><div class="ss-num" style="color:#a9312e;">${r.rejected}</div><div class="ss-label">拒绝</div></div>
     <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${r.failed}</div><div class="ss-label">失败</div></div>
+    ${(r.not_selected ?? 0) > 0 ? `<div class="ss-item"><div class="ss-num" style="color:#8893a7;">${r.not_selected}</div><div class="ss-label">未勾选</div></div>` : ""}
   </div>`;
 
   let tblHtml = `<div class="snap-tbl-wrap"><table class="snap-tbl">
     <thead><tr><th>工单号</th><th>操作</th><th>成功</th><th>原因</th></tr></thead><tbody>`;
 
   r.items.forEach(item => {
-    const actionMap = { create: "新建", overwrite: "覆盖", skip: "跳过", reject: "拒绝", error: "异常" };
-    const clsMap = { create: "snap-result-create", overwrite: "snap-result-overwrite", skip: "snap-result-skip", reject: "snap-result-reject", error: "snap-result-error" };
+    const actionMap = { create: "新建", overwrite: "覆盖", skip: "跳过", reject: "拒绝", error: "异常", not_selected: "未勾选" };
+    const clsMap = { create: "snap-result-create", overwrite: "snap-result-overwrite", skip: "snap-result-skip", reject: "snap-result-reject", error: "snap-result-error", not_selected: "snap-result-skip" };
     tblHtml += `<tr>
       <td><strong>${item.order_no}</strong></td>
       <td><span class="snap-result-tag ${clsMap[item.action] || ""}">${actionMap[item.action] || item.action}</span></td>
