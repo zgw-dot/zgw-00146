@@ -203,6 +203,9 @@ class RestoreBatchItem(Base):
     is_revoked = Column(Boolean, default=False)
     revoked_at = Column(DateTime)
     revoke_failed_reason = Column(Text)
+    revoke_action = Column(String(50))
+    revoke_result_reason = Column(Text)
+    revoke_changed_fields = Column(Text)
 
     batch = relationship("RestoreBatch", back_populates="items")
 
@@ -215,8 +218,33 @@ def get_db():
         db.close()
 
 
+def _migrate_restore_batch_items():
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        result = db.execute(text("PRAGMA table_info(restore_batch_items)")).fetchall()
+        existing_cols = {row[1] for row in result}
+        
+        needed_cols = {
+            "revoke_action": "VARCHAR(50)",
+            "revoke_result_reason": "TEXT",
+            "revoke_changed_fields": "TEXT",
+        }
+        
+        for col_name, col_type in needed_cols.items():
+            if col_name not in existing_cols:
+                db.execute(text(f"ALTER TABLE restore_batch_items ADD COLUMN {col_name} {col_type}"))
+        
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_restore_batch_items()
     db = SessionLocal()
     try:
         if not db.query(User).filter(User.username == "admin").first():

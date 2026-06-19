@@ -1547,6 +1547,9 @@ class RestoreBatchItemOut(BaseModel):
     is_revoked: bool
     revoked_at: Optional[datetime]
     revoke_failed_reason: Optional[str]
+    revoke_action: Optional[str]
+    revoke_result_reason: Optional[str]
+    revoke_changed_fields: Optional[List[str]]
 
     class Config:
         from_attributes = True
@@ -1592,6 +1595,7 @@ class RevokeBatchItemOut(BaseModel):
     action: str
     success: bool
     reason: str
+    changed_fields: Optional[List[str]] = None
 
 
 class RevokeBatchOut(BaseModel):
@@ -1634,6 +1638,12 @@ def get_restore_batch(
 
     items = []
     for item in batch.items:
+        changed_fields = None
+        if item.revoke_changed_fields:
+            try:
+                changed_fields = json.loads(item.revoke_changed_fields)
+            except Exception:
+                changed_fields = None
         items.append(RestoreBatchItemOut(
             id=item.id,
             batch_id=item.batch_id,
@@ -1647,6 +1657,9 @@ def get_restore_batch(
             is_revoked=item.is_revoked,
             revoked_at=item.revoked_at,
             revoke_failed_reason=item.revoke_failed_reason,
+            revoke_action=item.revoke_action,
+            revoke_result_reason=item.revoke_result_reason,
+            revoke_changed_fields=changed_fields,
         ))
 
     return RestoreBatchDetailOut(
@@ -1675,11 +1688,11 @@ def get_restore_batch(
     )
 
 
-def _check_order_modified_since(db: Session, order: WorkOrder, after_snap_json: str) -> tuple[bool, str]:
+def _check_order_modified_since(db: Session, order: WorkOrder, after_snap_json: str) -> tuple[bool, str, List[str]]:
     try:
         after_snap = json.loads(after_snap_json) if after_snap_json else {}
     except Exception:
-        return True, "无法解析恢复后快照，无法确认是否被修改"
+        return True, "无法解析恢复后快照，无法确认是否被修改", []
 
     current_snap = _serialize_order_snapshot(order)
 
@@ -1694,8 +1707,11 @@ def _check_order_modified_since(db: Session, order: WorkOrder, after_snap_json: 
             changed_fields.append(key)
 
     if changed_fields:
-        return True, f"工单已被人工修改，变更字段: {', '.join(changed_fields[:5])}"
-    return False, ""
+        field_display = ", ".join(changed_fields[:5])
+        if len(changed_fields) > 5:
+            field_display += f" 等{len(changed_fields)}个字段"
+        return True, f"工单已被人工修改，变更字段: {field_display}", changed_fields
+    return False, "", []
 
 
 @app.post("/api/restore-batches/{batch_id}/revoke", response_model=RevokeBatchOut)
@@ -1738,40 +1754,57 @@ def revoke_restore_batch(
             if not order:
                 item.is_revoked = True
                 item.revoked_at = datetime.utcnow()
-                item.revoke_failed_reason = "工单已不存在，视为已撤销"
+                item.revoke_action = "revoke_delete"
+                item.revoke_result_reason = "新建工单已不存在，视为已撤销"
+                item.revoke_failed_reason = None
+                item.revoke_changed_fields = None
                 revoked_count += 1
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_delete", success=True,
                     reason="新建工单已不存在，视为已撤销",
+                    changed_fields=None,
                 ))
                 continue
 
             db.delete(order)
             item.is_revoked = True
             item.revoked_at = datetime.utcnow()
+            item.revoke_action = "revoke_delete"
+            item.revoke_result_reason = "删除新建的工单，成功撤销"
+            item.revoke_failed_reason = None
+            item.revoke_changed_fields = None
             revoked_count += 1
             revoke_results.append(RevokeBatchItemOut(
                 order_no=order_no, action="revoke_delete", success=True,
                 reason="删除新建的工单，成功撤销",
+                changed_fields=None,
             ))
 
         elif action_val == "overwrite":
             if not order:
                 failed_count += 1
+                item.revoke_action = "revoke_skip"
+                item.revoke_result_reason = None
                 item.revoke_failed_reason = "被覆盖的工单已不存在，无法撤销"
+                item.revoke_changed_fields = None
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_skip", success=False,
                     reason="被覆盖的工单已不存在，无法撤销",
+                    changed_fields=None,
                 ))
                 continue
 
-            modified, mod_reason = _check_order_modified_since(db, order, item.after_snapshot_json or "")
+            modified, mod_reason, changed_fields_list = _check_order_modified_since(db, order, item.after_snapshot_json or "")
             if modified:
                 failed_count += 1
+                item.revoke_action = "revoke_skip"
+                item.revoke_result_reason = None
                 item.revoke_failed_reason = mod_reason
+                item.revoke_changed_fields = json.dumps(changed_fields_list, ensure_ascii=False) if changed_fields_list else None
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_skip", success=False,
                     reason=mod_reason,
+                    changed_fields=changed_fields_list if changed_fields_list else None,
                 ))
                 continue
 
@@ -1779,56 +1812,143 @@ def revoke_restore_batch(
                 before_snap = json.loads(item.before_snapshot_json) if item.before_snapshot_json else {}
             except Exception:
                 failed_count += 1
+                item.revoke_action = "revoke_skip"
+                item.revoke_result_reason = None
                 item.revoke_failed_reason = "无法解析恢复前快照，无法回退"
+                item.revoke_changed_fields = None
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_skip", success=False,
                     reason="无法解析恢复前快照，无法回退",
+                    changed_fields=None,
                 ))
                 continue
 
-            try:
-                if before_snap.get("risk_level"):
-                    order.risk_level = RiskLevel(before_snap["risk_level"])
-            except ValueError:
-                pass
+            restore_changed_fields = []
+            if before_snap.get("risk_level"):
+                try:
+                    new_risk = RiskLevel(before_snap["risk_level"])
+                    if order.risk_level != new_risk:
+                        restore_changed_fields.append("risk_level")
+                    order.risk_level = new_risk
+                except ValueError:
+                    pass
 
+            if order.road != before_snap.get("road", order.road):
+                restore_changed_fields.append("road")
             order.road = before_snap.get("road", order.road)
+
+            if order.tree_no != before_snap.get("tree_no", order.tree_no):
+                restore_changed_fields.append("tree_no")
             order.tree_no = before_snap.get("tree_no", order.tree_no)
-            order.suggested_time = before_snap.get("suggested_time", "") or ""
-            order.need_road_close = before_snap.get("need_road_close", order.need_road_close)
-            order.description = before_snap.get("description", "") or ""
+
+            suggested_time_val = before_snap.get("suggested_time", "") or ""
+            if order.suggested_time != suggested_time_val:
+                restore_changed_fields.append("suggested_time")
+            order.suggested_time = suggested_time_val
+
+            need_close_val = before_snap.get("need_road_close", order.need_road_close)
+            if order.need_road_close != need_close_val:
+                restore_changed_fields.append("need_road_close")
+            order.need_road_close = need_close_val
+
+            desc_val = before_snap.get("description", "") or ""
+            if order.description != desc_val:
+                restore_changed_fields.append("description")
+            order.description = desc_val
 
             try:
                 status_val = before_snap.get("status")
                 if status_val:
-                    order.status = OrderStatus(status_val)
+                    new_status = OrderStatus(status_val)
+                    if order.status != new_status:
+                        restore_changed_fields.append("status")
+                    order.status = new_status
             except ValueError:
                 pass
 
-            order.team_id = before_snap.get("team_id")
-            order.vehicle_id = before_snap.get("vehicle_id")
-            order.road_close_start = _parse_iso(before_snap.get("road_close_start"))
-            order.road_close_end = _parse_iso(before_snap.get("road_close_end"))
-            order.reported_at = _parse_iso(before_snap.get("reported_at"))
-            order.assigned_at = _parse_iso(before_snap.get("assigned_at"))
-            order.started_at = _parse_iso(before_snap.get("started_at"))
-            order.submitted_at = _parse_iso(before_snap.get("submitted_at"))
-            order.reviewed_at = _parse_iso(before_snap.get("reviewed_at"))
-            order.review_note = before_snap.get("review_note") if before_snap.get("review_note") is not None else order.review_note
-            order.cancelled_at = _parse_iso(before_snap.get("cancelled_at"))
-            order.cancel_reason = before_snap.get("cancel_reason") if before_snap.get("cancel_reason") is not None else order.cancel_reason
+            team_id_val = before_snap.get("team_id")
+            if order.team_id != team_id_val:
+                restore_changed_fields.append("team_id")
+            order.team_id = team_id_val
+
+            vehicle_id_val = before_snap.get("vehicle_id")
+            if order.vehicle_id != vehicle_id_val:
+                restore_changed_fields.append("vehicle_id")
+            order.vehicle_id = vehicle_id_val
+
+            rcs_val = _parse_iso(before_snap.get("road_close_start"))
+            if order.road_close_start != rcs_val:
+                restore_changed_fields.append("road_close_start")
+            order.road_close_start = rcs_val
+
+            rce_val = _parse_iso(before_snap.get("road_close_end"))
+            if order.road_close_end != rce_val:
+                restore_changed_fields.append("road_close_end")
+            order.road_close_end = rce_val
+
+            reported_at_val = _parse_iso(before_snap.get("reported_at"))
+            if order.reported_at != reported_at_val:
+                restore_changed_fields.append("reported_at")
+            order.reported_at = reported_at_val
+
+            assigned_at_val = _parse_iso(before_snap.get("assigned_at"))
+            if order.assigned_at != assigned_at_val:
+                restore_changed_fields.append("assigned_at")
+            order.assigned_at = assigned_at_val
+
+            started_at_val = _parse_iso(before_snap.get("started_at"))
+            if order.started_at != started_at_val:
+                restore_changed_fields.append("started_at")
+            order.started_at = started_at_val
+
+            submitted_at_val = _parse_iso(before_snap.get("submitted_at"))
+            if order.submitted_at != submitted_at_val:
+                restore_changed_fields.append("submitted_at")
+            order.submitted_at = submitted_at_val
+
+            reviewed_at_val = _parse_iso(before_snap.get("reviewed_at"))
+            if order.reviewed_at != reviewed_at_val:
+                restore_changed_fields.append("reviewed_at")
+            order.reviewed_at = reviewed_at_val
+
+            review_note_val = before_snap.get("review_note") if before_snap.get("review_note") is not None else order.review_note
+            if order.review_note != review_note_val:
+                restore_changed_fields.append("review_note")
+            order.review_note = review_note_val
+
+            cancelled_at_val = _parse_iso(before_snap.get("cancelled_at"))
+            if order.cancelled_at != cancelled_at_val:
+                restore_changed_fields.append("cancelled_at")
+            order.cancelled_at = cancelled_at_val
+
+            cancel_reason_val = before_snap.get("cancel_reason") if before_snap.get("cancel_reason") is not None else order.cancel_reason
+            if order.cancel_reason != cancel_reason_val:
+                restore_changed_fields.append("cancel_reason")
+            order.cancel_reason = cancel_reason_val
 
             db.query(StatusHistory).filter(StatusHistory.order_id == order.id).delete()
 
             _record_history(db, order, item.after_status, order.status, user,
                             note=f"批次撤销回退：从「{item.after_status}」回退为「{order.status.value}」")
 
+            success_reason = f"回退到恢复前状态：{item.after_status} → {order.status.value}"
+            if restore_changed_fields:
+                field_display = ", ".join(restore_changed_fields[:5])
+                if len(restore_changed_fields) > 5:
+                    field_display += f" 等{len(restore_changed_fields)}个字段"
+                success_reason += f"（变更字段: {field_display}）"
+
             item.is_revoked = True
             item.revoked_at = datetime.utcnow()
+            item.revoke_action = "revoke_restore"
+            item.revoke_result_reason = success_reason
+            item.revoke_failed_reason = None
+            item.revoke_changed_fields = json.dumps(restore_changed_fields, ensure_ascii=False) if restore_changed_fields else None
             revoked_count += 1
             revoke_results.append(RevokeBatchItemOut(
                 order_no=order_no, action="revoke_restore", success=True,
-                reason=f"回退到恢复前状态：{item.after_status} → {order.status.value}",
+                reason=success_reason,
+                changed_fields=restore_changed_fields if restore_changed_fields else None,
             ))
 
     batch.revoked_count = (batch.revoked_count or 0) + revoked_count
@@ -1847,13 +1967,23 @@ def revoke_restore_batch(
     batch.revoked_by_name = user.name
     batch.revoke_reason = data.reason.strip()
 
+    failed_orders = [r for r in revoke_results if not r.success]
+    if failed_orders:
+        failed_details = "; ".join([f"{r.order_no}: {r.reason}" for r in failed_orders[:3]])
+        audit_detail = (f"撤销批次 {batch.batch_no}: 可撤销={len(revocable_items)}, "
+                        f"成功={revoked_count}, 失败={failed_count}, 原因={data.reason}, "
+                        f"失败详情: {failed_details}")
+    else:
+        audit_detail = (f"撤销批次 {batch.batch_no}: 可撤销={len(revocable_items)}, "
+                        f"成功={revoked_count}, 失败={failed_count}, 原因={data.reason}")
+
     log = AuditLog(
         action="snapshot_revoke",
         operator_id=user.id,
         operator_name=user.name,
         target_type="restore_batch",
         target_id=batch.batch_no,
-        detail=f"撤销批次 {batch.batch_no}: 可撤销={len(revocable_items)}, 成功={revoked_count}, 失败={failed_count}, 原因={data.reason}",
+        detail=audit_detail,
         snapshot_version=batch.snapshot_version,
     )
     db.add(log)

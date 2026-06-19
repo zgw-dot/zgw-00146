@@ -1410,11 +1410,20 @@ function renderBatchList(batches) {
   let html = `<div class="snap-tbl-wrap"><table class="snap-tbl">
     <thead><tr>
       <th>批次号</th><th>操作人</th><th>恢复时间</th>
-      <th>快照版本</th><th>总计</th><th>成功</th><th>撤销</th><th>状态</th><th>操作</th>
+      <th>快照版本</th><th>总计</th><th>恢复成功</th><th>已撤销</th><th>撤销失败</th><th>状态</th><th>操作</th>
     </tr></thead><tbody>`;
 
   batches.forEach(b => {
     const st = statusMap[b.status] || { label: b.status, cls: "" };
+    const revokedCount = b.revoked_count || 0;
+    
+    let statusNote = "";
+    if (b.status === "revoked") {
+      statusNote = `<br/><span style="font-size:11px;color:#8893a7;">${fmtTime(b.revoked_at)} · ${b.revoked_by_name || ""}</span>`;
+    } else if (b.status === "partially_revoked") {
+      statusNote = `<br/><span style="font-size:11px;color:#856404;">${fmtTime(b.revoked_at)} · ${b.revoked_by_name || ""}</span>`;
+    }
+    
     html += `<tr>
       <td><strong>${b.batch_no}</strong></td>
       <td>${b.operator_name || "-"}</td>
@@ -1422,14 +1431,18 @@ function renderBatchList(batches) {
       <td>${b.snapshot_version || "-"}</td>
       <td>${b.total_count}</td>
       <td style="color:#1d7c4c;">${b.imported_count}</td>
-      <td style="color:#856404;">${b.revoked_count || 0}</td>
-      <td><span class="snap-decision-tag ${st.cls}">${st.label}</span></td>
+      <td style="color:#e67e22;">${revokedCount}</td>
+      <td style="color:#d9534f;">${b.status === "partially_revoked" ? (b.imported_count - revokedCount) : "-"}</td>
+      <td>
+        <span class="snap-decision-tag ${st.cls}">${st.label}</span>
+        ${statusNote}
+      </td>
       <td>
         <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px;"
           onclick="viewBatchDetail(${b.id})">详情</button>
-        ${b.status !== "revoked" && b.imported_count > 0 ? `
+        ${b.status !== "revoked" && b.imported_count > 0 && (b.imported_count - revokedCount) > 0 ? `
           <button class="btn btn-warn" style="padding:3px 10px;font-size:12px;"
-            onclick="openRevokeBatch(${b.id})">撤销</button>
+            onclick="openRevokeBatch(${b.id})">撤销 (${b.imported_count - revokedCount}条)</button>
         ` : ""}
       </td>
     </tr>`;
@@ -1475,15 +1488,28 @@ function renderBatchDetail(detail) {
   }
   metaHtml += `</div>`;
 
+  const revocableCount = detail.items.filter(i => 
+    i.success && (i.action === "create" || i.action === "overwrite")
+  ).length;
+  const revokedCount = detail.items.filter(i => i.is_revoked).length;
+  const revokeFailedCount = detail.items.filter(i => 
+    i.revoke_failed_reason && !i.is_revoked
+  ).length;
+
   let summaryHtml = `<div class="snap-summary">
     <div class="ss-item"><div class="ss-num">${detail.total_count}</div><div class="ss-label">总计</div></div>
-    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${detail.imported_count}</div><div class="ss-label">成功</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${detail.imported_count}</div><div class="ss-label">恢复成功</div></div>
     <div class="ss-item"><div class="ss-num" style="color:#5a6780;">${detail.skipped_count}</div><div class="ss-label">跳过</div></div>
     <div class="ss-item"><div class="ss-num" style="color:#a9312e;">${detail.rejected_count}</div><div class="ss-label">拒绝</div></div>
-    <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${detail.failed_count}</div><div class="ss-label">失败</div></div>
-    <div class="ss-item"><div class="ss-num" style="color:#8893a7;">${detail.not_selected_count}</div><div class="ss-label">未勾选</div></div>
-    ${detail.revoked_count > 0 ? `<div class="ss-item"><div class="ss-num" style="color:#e67e22;">${detail.revoked_count}</div><div class="ss-label">已撤销</div></div>` : ""}
-  </div>`;
+    <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${detail.failed_count}</div><div class="ss-label">恢复失败</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#8893a7;">${detail.not_selected_count}</div><div class="ss-label">未勾选</div></div>`;
+  if (detail.revoked_count > 0 || revokedCount > 0) {
+    summaryHtml += `<div class="ss-item"><div class="ss-num" style="color:#e67e22;">${revokedCount}</div><div class="ss-label">已撤销</div></div>`;
+  }
+  if (revokeFailedCount > 0) {
+    summaryHtml += `<div class="ss-item"><div class="ss-num" style="color:#d9534f;">${revokeFailedCount}</div><div class="ss-label">撤销失败</div></div>`;
+  }
+  summaryHtml += `</div>`;
 
   const actionMap = {
     create: { label: "新建", cls: "snap-result-create" },
@@ -1494,25 +1520,60 @@ function renderBatchDetail(detail) {
     error: { label: "异常", cls: "snap-result-error" },
   };
 
+  const revokeActionMap = {
+    "revoke_delete": { label: "删除工单", cls: "snap-result-create" },
+    "revoke_restore": { label: "恢复原状", cls: "snap-result-overwrite" },
+    "revoke_skip": { label: "撤销失败", cls: "snap-result-reject" },
+  };
+
   let tblHtml = `<div class="snap-tbl-wrap"><table class="snap-tbl">
     <thead><tr>
-      <th>工单号</th><th>操作</th><th>成功</th>
-      <th>恢复前状态</th><th>恢复后状态</th><th>是否已撤销</th><th>原因</th>
+      <th>工单号</th><th>恢复操作</th><th>恢复成功</th>
+      <th>恢复前</th><th>恢复后</th>
+      <th>撤销状态</th><th>撤销操作</th><th>撤销结果</th><th>变更字段</th>
     </tr></thead><tbody>`;
 
   detail.items.forEach(item => {
     const act = actionMap[item.action] || { label: item.action, cls: "" };
+    
+    let revokeStatusHtml = "未撤销";
+    let revokeActionHtml = "-";
+    let revokeResultHtml = "-";
+    let changedFieldsHtml = "-";
+    
+    if (item.is_revoked) {
+      revokeStatusHtml = `<span style="color:#e67e22;font-weight:500;">已撤销</span><br/><span style="font-size:11px;color:#8893a7;">${fmtTime(item.revoked_at)}</span>`;
+      
+      const revAct = revokeActionMap[item.revoke_action] || { label: item.revoke_action || "已撤销", cls: "" };
+      revokeActionHtml = `<span class="snap-result-tag ${revAct.cls}">${revAct.label}</span>`;
+      
+      revokeResultHtml = item.revoke_result_reason || "撤销成功";
+      
+      if (item.revoke_changed_fields && item.revoke_changed_fields.length > 0) {
+        changedFieldsHtml = `<span style="color:#5a6780;font-size:11.5px;">${item.revoke_changed_fields.join(", ")}</span>`;
+      }
+    } else if (item.revoke_failed_reason) {
+      revokeStatusHtml = `<span style="color:#d9534f;font-weight:500;">撤销失败</span>`;
+      revokeActionHtml = `<span class="snap-result-tag snap-result-reject">撤销失败</span>`;
+      revokeResultHtml = `<span style="color:#d9534f;font-size:12px;">${item.revoke_failed_reason}</span>`;
+      
+      if (item.revoke_changed_fields && item.revoke_changed_fields.length > 0) {
+        changedFieldsHtml = `<span style="color:#d9534f;font-size:11.5px;">${item.revoke_changed_fields.join(", ")}</span>`;
+      }
+    } else if (item.success && (item.action === "create" || item.action === "overwrite")) {
+      revokeStatusHtml = `<span style="color:#8893a7;">可撤销</span>`;
+    }
+    
     tblHtml += `<tr>
       <td><strong>${item.order_no}</strong></td>
       <td><span class="snap-result-tag ${act.cls}">${act.label}</span></td>
       <td>${item.success ? "✅" : "❌"}</td>
       <td>${item.before_status || "-"}</td>
       <td>${item.after_status || "-"}</td>
-      <td>${item.is_revoked ? `<span style="color:#e67e22;font-size:12px;">是 · ${fmtTime(item.revoked_at)}</span>` : "否"}</td>
-      <td style="font-size:12px;color:#5a6780;max-width:300px;">
-        ${item.reason || "-"}
-        ${item.revoke_failed_reason ? `<br/><span style="color:#d9534f;">撤销失败：${item.revoke_failed_reason}</span>` : ""}
-      </td>
+      <td>${revokeStatusHtml}</td>
+      <td>${revokeActionHtml}</td>
+      <td style="font-size:12px;max-width:320px;">${revokeResultHtml}</td>
+      <td style="font-size:11.5px;max-width:200px;">${changedFieldsHtml}</td>
     </tr>`;
   });
 
@@ -1520,7 +1581,23 @@ function renderBatchDetail(detail) {
 
   if (detail.revoke_reason) {
     tblHtml += `<div style="margin-top:12px;padding:10px 14px;background:#fff8e1;border-radius:6px;font-size:12.5px;color:#856404;">
-      <strong>撤销原因：</strong>${detail.revoke_reason}
+      <strong>撤销批次原因：</strong>${detail.revoke_reason}
+      ${detail.revoked_by_name ? ` · 操作人：${detail.revoked_by_name}` : ""}
+      ${detail.revoked_at ? ` · ${fmtTime(detail.revoked_at)}` : ""}
+    </div>`;
+  }
+
+  if (detail.status === "partially_revoked" || (revokedCount > 0 && revokeFailedCount > 0)) {
+    tblHtml += `<div style="margin-top:12px;padding:10px 14px;background:#fff3cd;border-radius:6px;font-size:12.5px;color:#856404;">
+      <strong>⚠ 部分撤销提示：</strong>本批次共 ${revocableCount} 条可撤销工单，已成功撤销 ${revokedCount} 条，${revokeFailedCount} 条撤销失败。
+      失败工单保留恢复后状态，请根据失败原因人工处理。
+    </div>`;
+  }
+
+  if (detail.status === "revoked" && revocableCount > 0) {
+    tblHtml += `<div style="margin-top:12px;padding:10px 14px;background:#e8f5e9;border-radius:6px;font-size:12.5px;color:#1d7c4c;">
+      <strong>✔ 全部撤销完成：</strong>本批次 ${revocableCount} 条可撤销工单已全部撤销，
+      ${revokedCount} 条成功回退到恢复前状态。
     </div>`;
   }
 
@@ -1528,7 +1605,12 @@ function renderBatchDetail(detail) {
 
   let footerHtml = `<button class="btn btn-ghost" onclick="closeModal('batchDetailModal')">关闭</button>`;
   if (detail.status !== "revoked" && detail.imported_count > 0) {
-    footerHtml = `<button class="btn btn-warn" onclick="openRevokeBatch(${detail.id})">↩ 撤销本批次</button>` + footerHtml;
+    const remainingRevocable = detail.items.filter(i => 
+      i.success && (i.action === "create" || i.action === "overwrite") && !i.is_revoked
+    ).length;
+    if (remainingRevocable > 0) {
+      footerHtml = `<button class="btn btn-warn" onclick="openRevokeBatch(${detail.id})">↩ 撤销本批次 (${remainingRevocable}条)</button>` + footerHtml;
+    }
   }
   footer.innerHTML = footerHtml;
 }
@@ -1537,6 +1619,120 @@ function openRevokeBatch(batchId) {
   batchState.revokeBatchId = batchId;
   $id("revokeReason").value = "";
   openModal("revokeBatchModal");
+}
+
+function _formatRevokeResult(result) {
+  const successItems = result.items.filter(i => i.success);
+  const failedItems = result.items.filter(i => !i.success);
+  
+  let msg = `✅ 撤销批次 ${result.batch_no} 完成：`;
+  msg += `成功 ${result.revoked} 条，失败 ${result.failed} 条`;
+  if (result.total_revocable > result.revoked + result.failed) {
+    msg += `，跳过 ${result.total_revocable - result.revoked - result.failed} 条`;
+  }
+  
+  if (failedItems.length > 0) {
+    msg += "\n\n❌ 失败工单：";
+    failedItems.slice(0, 3).forEach(item => {
+      msg += `\n  • ${item.order_no}: ${item.reason}`;
+    });
+    if (failedItems.length > 3) {
+      msg += `\n  ... 还有 ${failedItems.length - 3} 条失败，请查看批次详情`;
+    }
+  }
+  
+  if (successItems.length > 0 && failedItems.length === 0) {
+    msg += "\n\n✔ 所有工单已成功撤销：";
+    successItems.slice(0, 3).forEach(item => {
+      msg += `\n  • ${item.order_no}: ${item.reason}`;
+    });
+    if (successItems.length > 3) {
+      msg += `\n  ... 还有 ${successItems.length - 3} 条成功`;
+    }
+  }
+  
+  return msg;
+}
+
+function showRevokeResultModal(result) {
+  const successItems = result.items.filter(i => i.success);
+  const failedItems = result.items.filter(i => !i.success);
+  
+  let html = `<div style="margin-bottom:14px;padding:12px 16px;border-radius:8px;`;
+  if (result.failed > 0 && result.revoked > 0) {
+    html += `background:#fff8e1;border:1px solid #ffe58f;">`;
+    html += `<strong style="color:#856404;">⚠ 部分撤销成功</strong>`;
+  } else if (result.failed > 0) {
+    html += `background:#fad4d3;border:1px solid #f5b7b1;">`;
+    html += `<strong style="color:#a9312e;">❌ 撤销失败</strong>`;
+  } else {
+    html += `background:#e8f5e9;border:1px solid #a5d6a7;">`;
+    html += `<strong style="color:#1d7c4c;">✅ 全部撤销成功</strong>`;
+  }
+  html += `</div>`;
+  
+  html += `<div class="snap-summary" style="margin-bottom:14px;">
+    <div class="ss-item"><div class="ss-num">${result.total_revocable}</div><div class="ss-label">待撤销</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${result.revoked}</div><div class="ss-label">成功</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${result.failed}</div><div class="ss-label">失败</div></div>
+  </div>`;
+  
+  if (successItems.length > 0) {
+    html += `<h4 style="margin:12px 0 8px;font-size:14px;color:#1d7c4c;">✔ 成功撤销 (${successItems.length})</h4>`;
+    html += `<div class="snap-tbl-wrap"><table class="snap-tbl"><thead><tr>
+      <th>工单号</th><th>操作</th><th>结果说明</th><th>变更字段</th>
+    </tr></thead><tbody>`;
+    successItems.forEach(item => {
+      const changedFields = item.changed_fields && item.changed_fields.length > 0
+        ? item.changed_fields.join(", ")
+        : "-";
+      html += `<tr>
+        <td><strong>${item.order_no}</strong></td>
+        <td><span class="snap-result-tag snap-result-create">${item.action === "revoke_delete" ? "删除工单" : "恢复原状"}</span></td>
+        <td style="font-size:12px;color:#5a6780;">${item.reason}</td>
+        <td style="font-size:12px;color:#5a6780;">${changedFields}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+  
+  if (failedItems.length > 0) {
+    html += `<h4 style="margin:16px 0 8px;font-size:14px;color:#a9312e;">❌ 撤销失败 (${failedItems.length})</h4>`;
+    html += `<div class="snap-tbl-wrap"><table class="snap-tbl"><thead><tr>
+      <th>工单号</th><th>失败原因</th><th>变更字段</th>
+    </tr></thead><tbody>`;
+    failedItems.forEach(item => {
+      const changedFields = item.changed_fields && item.changed_fields.length > 0
+        ? `<span style="color:#d9534f;">${item.changed_fields.join(", ")}</span>`
+        : "-";
+      html += `<tr>
+        <td><strong>${item.order_no}</strong></td>
+        <td style="font-size:12px;color:#d9534f;">${item.reason}</td>
+        <td style="font-size:12px;">${changedFields}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+  
+  html += `<div style="margin-top:12px;padding:10px 14px;background:#f4f6fa;border-radius:6px;font-size:12.5px;color:#5a6780;">
+    <strong>批次状态：</strong>${{
+      "completed": "已完成",
+      "revoked": "已撤销",
+      "partially_revoked": "部分撤销",
+      "pending": "进行中",
+      "failed": "失败"
+    }[result.status] || result.status}
+  </div>`;
+  
+  const body = $id("batchDetailBody");
+  const footer = $id("batchDetailFooter");
+  body.innerHTML = html;
+  footer.innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('revokeBatchModal');closeModal('batchDetailModal');">关闭</button>
+    <button class="btn btn-primary" onclick="closeModal('revokeBatchModal');viewBatchDetail(${result.batch_id});">📋 查看批次详情</button>
+  `;
+  
+  openModal("batchDetailModal");
 }
 
 async function confirmRevokeBatch() {
@@ -1548,12 +1744,24 @@ async function confirmRevokeBatch() {
 
   try {
     const result = await api(`/restore-batches/${batchId}/revoke`, "POST", { reason });
-    toast(`✅ 撤销完成：成功 ${result.revoked} 条，失败 ${result.failed} 条`);
-    closeModal("revokeBatchModal");
-
-    if (batchState.currentBatchId === batchId) {
-      viewBatchDetail(batchId);
+    
+    const successItems = result.items.filter(i => i.success);
+    const failedItems = result.items.filter(i => !i.success);
+    
+    let toastMsg = "";
+    if (failedItems.length === 0) {
+      toastMsg = `✅ 撤销成功：${result.revoked} 条工单已全部撤销`;
+    } else if (successItems.length === 0) {
+      toastMsg = `❌ 撤销失败：${result.failed} 条工单均未撤销，请查看详情`;
+    } else {
+      toastMsg = `⚠ 部分撤销：成功 ${result.revoked} 条，失败 ${result.failed} 条`;
     }
+    toast(toastMsg, failedItems.length === 0 ? "ok" : (successItems.length === 0 ? "err" : "ok"));
+    
+    closeModal("revokeBatchModal");
+    
+    showRevokeResultModal(result);
+    
     loadBatchList();
     loadAll();
   } catch (e) {}
