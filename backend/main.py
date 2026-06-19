@@ -1202,23 +1202,13 @@ def snapshot_import(data: SnapshotImportIn,
                 reported_at = _parse_iso(item.get("reported_at"))
                 if reported_at:
                     existing.reported_at = reported_at
-                assigned_at = _parse_iso(item.get("assigned_at"))
-                if assigned_at:
-                    existing.assigned_at = assigned_at
-                started_at = _parse_iso(item.get("started_at"))
-                if started_at:
-                    existing.started_at = started_at
-                submitted_at = _parse_iso(item.get("submitted_at"))
-                if submitted_at:
-                    existing.submitted_at = submitted_at
-                reviewed_at = _parse_iso(item.get("reviewed_at"))
-                if reviewed_at:
-                    existing.reviewed_at = reviewed_at
-                existing.review_note = item.get("review_note") or existing.review_note
-                cancelled_at = _parse_iso(item.get("cancelled_at"))
-                if cancelled_at:
-                    existing.cancelled_at = cancelled_at
-                existing.cancel_reason = item.get("cancel_reason") or existing.cancel_reason
+                existing.assigned_at = _parse_iso(item.get("assigned_at"))
+                existing.started_at = _parse_iso(item.get("started_at"))
+                existing.submitted_at = _parse_iso(item.get("submitted_at"))
+                existing.reviewed_at = _parse_iso(item.get("reviewed_at"))
+                existing.review_note = item.get("review_note") if item.get("review_note") is not None else existing.review_note
+                existing.cancelled_at = _parse_iso(item.get("cancelled_at"))
+                existing.cancel_reason = item.get("cancel_reason") if item.get("cancel_reason") is not None else existing.cancel_reason
 
                 db.query(StatusHistory).filter(StatusHistory.order_id == existing.id).delete()
                 for h_item in item.get("histories", []):
