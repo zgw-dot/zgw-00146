@@ -1,0 +1,30 @@
+Step 1: 鍒涘缓宸ュ崟锛堜笉娲惧伐锛?
+  order_id=65, order_no=WO20260620054656E9F4
+  涓嶆淳宸ワ紝鐘舵€佸皢鏄緟娲惧伐
+  褰撳墠鐘舵€? 寰呮淳宸?
+
+Step 2: 瀵煎叆甯?Z 鏃堕棿鐨勫揩鐓?
+  鎵规ID=50, imported=0, skipped=0
+  - WO20260620054656E9F4: action=reject, success=False, reason=闃熶紞銆屼慨鍓竴闃熴€嶆椂闂村啿绐侊紝宸茶宸ュ崟 WO202606200546111320 鍗犵敤
+
+Step 3: 浠庢暟鎹簱鏌?RestoreBatchItem.after_snapshot_json
+  after_snapshot_json 涓殑鏃堕棿瀛楁:
+    road_close_start: ''
+    road_close_end: ''
+    reported_at: '2026-06-19T21:46:56.891695'
+    assigned_at: ''
+    started_at: ''
+    submitted_at: ''
+
+Step 4: 褰撳墠宸ュ崟搴忓垪鍖栫粨鏋?
+  DB 搴忓垪鍖栫殑鏃堕棿瀛楁:
+    road_close_start: ''
+    road_close_end: ''
+    reported_at: '2026-06-19T21:46:56.891695'
+    assigned_at: ''
+    started_at: ''
+    submitted_at: ''
+
+Step 5: 閫愬瓧娈垫瘮杈?(after_snap vs curr_snap) 鈥?杩欏氨鏄?_check_order_modified_since 鍋氱殑浜?
+
+缁撹: 鉁?鍏ㄩ儴涓€鑷达紝涓嶄細璇垽

@@ -1,0 +1,59 @@
+Step 1: 鍒涘缓宸ュ崟锛堜笉娲惧伐锛岄槦浼?杞﹁締/灏佽矾/assigned_at 鍏ㄩ儴涓虹┖锛?
+  order_id=66, order_no=WO20260620054910FEAA
+  鎭㈠鍓? status=寰呮淳宸?
+  team_id=None, vehicle_id=None
+  assigned_at=None
+  road_close_start=None, road_close_end=None
+
+Step 2: 瀵煎叆甯?Z 鏃堕棿鐨勫揩鐓э紙鏃犲皝璺紝閬垮厤鍐茬獊妫€娴嬶級
+  鎵规ID=51, imported=1, skipped=0
+  - WO20260620054910FEAA: action=overwrite, success=True, reason=瑕嗙洊鎭㈠锛氬緟娲惧伐 鈫?宸叉淳宸?
+
+Step 3: 鏌ユ暟鎹簱 after_snapshot_json
+  鏃堕棿瀛楁:
+    reported_at: '2026-06-19T18:26:08.946538' <-- 鏃犳椂鍖猴紝OK
+    assigned_at: '2026-06-19T18:26:09.015713' <-- 鏃犳椂鍖猴紝OK
+    started_at: '2026-06-20T02:00:00.123456' <-- 鏃犳椂鍖猴紝OK
+
+Step 4: 褰撳墠宸ュ崟搴忓垪鍖栨椂闂村瓧娈?
+    reported_at: '2026-06-19T18:26:08.946538'
+    assigned_at: '2026-06-19T18:26:09.015713'
+    started_at: '2026-06-20T02:00:00.123456'
+
+Step 5: 閫愬瓧娈垫瘮杈冿紙_check_order_modified_since 鐨勯€昏緫锛?
+
+缁撹: 鉁?鍏ㄩ儴涓€鑷达紒鏃跺尯褰掍竴淇鏈夋晥
+
+Step 6: 楠岃瘉鎭㈠鍚庣姸鎬侊紙闃熶紞/杞﹁締/assigned_at 搴旇鏈夊€硷級
+  status=宸叉淳宸?
+  team_id=1, vehicle_id=1
+  assigned_at='2026-06-19T18:26:09.015713'
+  鉁?鎭㈠鍚庣姸鎬佹纭?
+
+Step 7: 绔嬪嵆鎾ら攢鏈壒娆?
+  鐘舵€佺爜: 200
+  鍝嶅簲: {
+  "batch_id": 51,
+  "batch_no": "RST-20260620054910-48567B",
+  "total_revocable": 1,
+  "revoked": 1,
+  "failed": 0,
+  "status": "revoked",
+  "items": [
+    {
+      "order_no": "WO20260620054910FEAA",
+      "action": "revoke_restore",
+      "success": true,
+      "reason": "鍥為€€鍒版仮澶嶅墠鐘舵€侊細宸叉淳宸?鈫?寰呮淳宸?
+    }
+  ]
+}
+
+Step 8: 楠岃瘉鎾ら攢鍚庯紙闃熶紞/杞﹁締/灏佽矾/assigned_at 搴旇鐪熺┖涓?None锛?
+  status=寰呮淳宸?
+  team_id=None
+  vehicle_id=None
+  assigned_at=None
+  road_close_start=None, road_close_end=None
+
+鉁?绌哄€艰竟鐣岄獙璇侀€氳繃锛氶槦浼?杞﹁締/灏佽矾/assigned_at 鍏ㄩ儴鐪熺┖鎺?

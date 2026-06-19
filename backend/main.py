@@ -684,6 +684,13 @@ def _parse_iso(val):
 
 
 def _serialize_order_snapshot(o: WorkOrder) -> dict:
+    def _dt_iso(val):
+        if not val:
+            return ""
+        if hasattr(val, "tzinfo") and val.tzinfo is not None:
+            val = val.replace(tzinfo=None)
+        return val.isoformat()
+
     return {
         "id": o.id,
         "order_no": o.order_no,
@@ -696,15 +703,15 @@ def _serialize_order_snapshot(o: WorkOrder) -> dict:
         "status": o.status.value if hasattr(o.status, "value") else str(o.status),
         "team_id": o.team_id,
         "vehicle_id": o.vehicle_id,
-        "road_close_start": o.road_close_start.isoformat() if o.road_close_start else "",
-        "road_close_end": o.road_close_end.isoformat() if o.road_close_end else "",
-        "reported_at": o.reported_at.isoformat() if o.reported_at else "",
-        "assigned_at": o.assigned_at.isoformat() if o.assigned_at else "",
-        "started_at": o.started_at.isoformat() if o.started_at else "",
-        "submitted_at": o.submitted_at.isoformat() if o.submitted_at else "",
-        "reviewed_at": o.reviewed_at.isoformat() if o.reviewed_at else "",
+        "road_close_start": _dt_iso(o.road_close_start),
+        "road_close_end": _dt_iso(o.road_close_end),
+        "reported_at": _dt_iso(o.reported_at),
+        "assigned_at": _dt_iso(o.assigned_at),
+        "started_at": _dt_iso(o.started_at),
+        "submitted_at": _dt_iso(o.submitted_at),
+        "reviewed_at": _dt_iso(o.reviewed_at),
         "review_note": o.review_note or "",
-        "cancelled_at": o.cancelled_at.isoformat() if o.cancelled_at else "",
+        "cancelled_at": _dt_iso(o.cancelled_at),
         "cancel_reason": o.cancel_reason or "",
     }
 
@@ -1194,14 +1201,12 @@ def snapshot_import(data: SnapshotImportIn,
                 existing.need_road_close = item.get("need_road_close", "否") == "是"
                 existing.description = item.get("description", existing.description) or existing.description
                 existing.status = snap_status
-                existing.team_id = team_obj.id if team_obj else existing.team_id
-                existing.vehicle_id = vehicle_obj.id if vehicle_obj else existing.vehicle_id
-                existing.road_close_start = snap_rcs or existing.road_close_start
-                existing.road_close_end = snap_rce or existing.road_close_end
+                existing.team_id = team_obj.id if team_obj else None
+                existing.vehicle_id = vehicle_obj.id if vehicle_obj else None
+                existing.road_close_start = snap_rcs
+                existing.road_close_end = snap_rce
 
-                reported_at = _parse_iso(item.get("reported_at"))
-                if reported_at:
-                    existing.reported_at = reported_at
+                existing.reported_at = _parse_iso(item.get("reported_at"))
                 existing.assigned_at = _parse_iso(item.get("assigned_at"))
                 existing.started_at = _parse_iso(item.get("started_at"))
                 existing.submitted_at = _parse_iso(item.get("submitted_at"))
@@ -1789,9 +1794,9 @@ def revoke_restore_batch(
 
             order.road = before_snap.get("road", order.road)
             order.tree_no = before_snap.get("tree_no", order.tree_no)
-            order.suggested_time = before_snap.get("suggested_time") or order.suggested_time
+            order.suggested_time = before_snap.get("suggested_time", "") or ""
             order.need_road_close = before_snap.get("need_road_close", order.need_road_close)
-            order.description = before_snap.get("description") or order.description
+            order.description = before_snap.get("description", "") or ""
 
             try:
                 status_val = before_snap.get("status")
@@ -1800,18 +1805,18 @@ def revoke_restore_batch(
             except ValueError:
                 pass
 
-            order.team_id = before_snap.get("team_id") or order.team_id
-            order.vehicle_id = before_snap.get("vehicle_id") or order.vehicle_id
-            order.road_close_start = _parse_iso(before_snap.get("road_close_start")) or order.road_close_start
-            order.road_close_end = _parse_iso(before_snap.get("road_close_end")) or order.road_close_end
-            order.reported_at = _parse_iso(before_snap.get("reported_at")) or order.reported_at
-            order.assigned_at = _parse_iso(before_snap.get("assigned_at")) or order.assigned_at
-            order.started_at = _parse_iso(before_snap.get("started_at")) or order.started_at
-            order.submitted_at = _parse_iso(before_snap.get("submitted_at")) or order.submitted_at
-            order.reviewed_at = _parse_iso(before_snap.get("reviewed_at")) or order.reviewed_at
-            order.review_note = before_snap.get("review_note") or order.review_note
-            order.cancelled_at = _parse_iso(before_snap.get("cancelled_at")) or order.cancelled_at
-            order.cancel_reason = before_snap.get("cancel_reason") or order.cancel_reason
+            order.team_id = before_snap.get("team_id")
+            order.vehicle_id = before_snap.get("vehicle_id")
+            order.road_close_start = _parse_iso(before_snap.get("road_close_start"))
+            order.road_close_end = _parse_iso(before_snap.get("road_close_end"))
+            order.reported_at = _parse_iso(before_snap.get("reported_at"))
+            order.assigned_at = _parse_iso(before_snap.get("assigned_at"))
+            order.started_at = _parse_iso(before_snap.get("started_at"))
+            order.submitted_at = _parse_iso(before_snap.get("submitted_at"))
+            order.reviewed_at = _parse_iso(before_snap.get("reviewed_at"))
+            order.review_note = before_snap.get("review_note") if before_snap.get("review_note") is not None else order.review_note
+            order.cancelled_at = _parse_iso(before_snap.get("cancelled_at"))
+            order.cancel_reason = before_snap.get("cancel_reason") if before_snap.get("cancel_reason") is not None else order.cancel_reason
 
             db.query(StatusHistory).filter(StatusHistory.order_id == order.id).delete()
 
