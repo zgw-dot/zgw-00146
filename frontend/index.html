@@ -478,6 +478,7 @@
     <button class="btn btn-ghost" onclick="exportCsv()">⬇ 导出 CSV</button>
     <button class="btn btn-ghost" onclick="exportJson()">⬇ 导出 JSON</button>
     <button class="btn btn-ghost" id="btnSnapRestore" onclick="openSnapshotModal()" style="display:none;">📦 快照恢复</button>
+    <button class="btn btn-ghost" id="btnBatchHistory" onclick="openBatchHistoryModal()" style="display:none;">📜 恢复批次</button>
   </div>
 </header>
 
@@ -615,6 +616,49 @@
   </div>
 </div>
 
+<!-- 恢复批次历史 Modal -->
+<div class="modal-mask" id="batchHistoryModal">
+  <div class="modal" style="max-width:960px;">
+    <header><h2>📜 快照恢复批次历史</h2></header>
+    <div class="modal-body" id="batchHistoryBody" style="min-height:200px;"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('batchHistoryModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批次详情 Modal -->
+<div class="modal-mask" id="batchDetailModal">
+  <div class="modal" style="max-width:960px;">
+    <header><h2>📋 批次详情</h2></header>
+    <div class="modal-body" id="batchDetailBody" style="min-height:200px;"></div>
+    <div class="modal-footer" id="batchDetailFooter">
+      <button class="btn btn-ghost" onclick="closeModal('batchDetailModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 撤销批次确认 Modal -->
+<div class="modal-mask" id="revokeBatchModal">
+  <div class="modal">
+    <header><h2>⚠ 撤销恢复批次</h2></header>
+    <div class="modal-body">
+      <p style="margin:0 0 12px;font-size:13px;color:#d9534f;">
+        撤销将回退本次恢复新建或覆盖过的工单数据。<br/>
+        未勾选、被拒绝、以及后来被人工修改过的工单不会被改动。
+      </p>
+      <div class="form-row">
+        <label>撤销原因<span class="req">*</span></label>
+        <textarea id="revokeReason" placeholder="请填写撤销原因"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('revokeBatchModal')">取消</button>
+      <button class="btn btn-danger" onclick="confirmRevokeBatch()">✅ 确认撤销</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-wrap"></div>
 
 <script>
@@ -685,6 +729,7 @@ async function onRoleChange() {
       $id("userInfo").textContent = `当前身份：${state.currentUser.name}（${state.currentUser.role === "admin" ? "管理员" : "巡查员"}）`;
       $id("btnReport").style.display = state.currentUser.role === "inspector" ? "inline-block" : "none";
       $id("btnSnapRestore").style.display = state.currentUser.role === "admin" ? "inline-block" : "none";
+      $id("btnBatchHistory").style.display = state.currentUser.role === "admin" ? "inline-block" : "none";
     } catch (e) {}
   } else {
     state.currentUser = null;
@@ -1308,7 +1353,11 @@ function renderSnapStep4(body, footer) {
   tblHtml += `</tbody></table></div>`;
 
   body.innerHTML = renderStepBar(4) + summaryHtml + tblHtml;
-  footer.innerHTML = `<button class="btn btn-primary" onclick="closeModal('snapshotModal');loadAll();">完成</button>`;
+  let footerHtml = `<button class="btn btn-primary" onclick="closeModal('snapshotModal');loadAll();">完成</button>`;
+  if (r.batch_id) {
+    footerHtml = `<button class="btn btn-ghost" onclick="closeModal('snapshotModal');viewBatchDetail(${r.batch_id});">📋 查看批次详情</button>` + footerHtml;
+  }
+  footer.innerHTML = footerHtml;
 }
 
 // ---------- modal helpers ----------
@@ -1317,6 +1366,198 @@ function closeModal(id) { $id(id).classList.remove("show"); }
 document.querySelectorAll(".modal-mask").forEach(m => {
   m.addEventListener("click", e => { if (e.target === m) m.classList.remove("show"); });
 });
+
+// ---------- batch history ----------
+const batchState = {
+  currentBatchId: null,
+  revokeBatchId: null,
+};
+
+function openBatchHistoryModal() {
+  if (!state.currentUser || state.currentUser.role !== "admin") {
+    toast("只有管理员可查看恢复批次", "err"); return;
+  }
+  loadBatchList();
+  openModal("batchHistoryModal");
+}
+
+async function loadBatchList() {
+  const body = $id("batchHistoryBody");
+  body.innerHTML = `<div style="text-align:center;padding:30px;color:#8893a7;">加载中…</div>`;
+  try {
+    const batches = await api("/restore-batches");
+    renderBatchList(batches);
+  } catch (e) {
+    body.innerHTML = `<div style="color:#d9534f;padding:20px;">加载失败：${e.message}</div>`;
+  }
+}
+
+function renderBatchList(batches) {
+  const body = $id("batchHistoryBody");
+  if (!batches || batches.length === 0) {
+    body.innerHTML = `<div class="empty">暂无恢复批次记录</div>`;
+    return;
+  }
+
+  const statusMap = {
+    "completed": { label: "已完成", cls: "snap-decision-ok" },
+    "revoked": { label: "已撤销", cls: "snap-decision-skip" },
+    "partially_revoked": { label: "部分撤销", cls: "snap-decision-overwrite_or_skip" },
+    "pending": { label: "进行中", cls: "" },
+    "failed": { label: "失败", cls: "snap-decision-reject" },
+  };
+
+  let html = `<div class="snap-tbl-wrap"><table class="snap-tbl">
+    <thead><tr>
+      <th>批次号</th><th>操作人</th><th>恢复时间</th>
+      <th>快照版本</th><th>总计</th><th>成功</th><th>撤销</th><th>状态</th><th>操作</th>
+    </tr></thead><tbody>`;
+
+  batches.forEach(b => {
+    const st = statusMap[b.status] || { label: b.status, cls: "" };
+    html += `<tr>
+      <td><strong>${b.batch_no}</strong></td>
+      <td>${b.operator_name || "-"}</td>
+      <td>${fmtTime(b.created_at)}</td>
+      <td>${b.snapshot_version || "-"}</td>
+      <td>${b.total_count}</td>
+      <td style="color:#1d7c4c;">${b.imported_count}</td>
+      <td style="color:#856404;">${b.revoked_count || 0}</td>
+      <td><span class="snap-decision-tag ${st.cls}">${st.label}</span></td>
+      <td>
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px;"
+          onclick="viewBatchDetail(${b.id})">详情</button>
+        ${b.status !== "revoked" && b.imported_count > 0 ? `
+          <button class="btn btn-warn" style="padding:3px 10px;font-size:12px;"
+            onclick="openRevokeBatch(${b.id})">撤销</button>
+        ` : ""}
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  body.innerHTML = html;
+}
+
+async function viewBatchDetail(batchId) {
+  batchState.currentBatchId = batchId;
+  const body = $id("batchDetailBody");
+  body.innerHTML = `<div style="text-align:center;padding:30px;color:#8893a7;">加载中…</div>`;
+  try {
+    const detail = await api(`/restore-batches/${batchId}`);
+    renderBatchDetail(detail);
+    openModal("batchDetailModal");
+  } catch (e) {
+    body.innerHTML = `<div style="color:#d9534f;padding:20px;">加载失败：${e.message}</div>`;
+  }
+}
+
+function renderBatchDetail(detail) {
+  const body = $id("batchDetailBody");
+  const footer = $id("batchDetailFooter");
+
+  const statusMap = {
+    "completed": { label: "已完成", cls: "snap-decision-ok" },
+    "revoked": { label: "已撤销", cls: "snap-decision-skip" },
+    "partially_revoked": { label: "部分撤销", cls: "snap-decision-overwrite_or_skip" },
+  };
+  const st = statusMap[detail.status] || { label: detail.status, cls: "" };
+
+  let metaHtml = `<div class="snap-meta-bar">`;
+  metaHtml += `<div><span class="mk">批次号：</span><strong>${detail.batch_no}</strong></div>`;
+  metaHtml += `<div><span class="mk">操作人：</span>${detail.operator_name || "-"}</div>`;
+  metaHtml += `<div><span class="mk">恢复时间：</span>${fmtTime(detail.created_at)}</div>`;
+  metaHtml += `<div><span class="mk">快照版本：</span>${detail.snapshot_version || "-"}</div>`;
+  metaHtml += `<div><span class="mk">状态：</span><span class="snap-decision-tag ${st.cls}">${st.label}</span></div>`;
+  if (detail.revoked_at) {
+    metaHtml += `<div><span class="mk">撤销时间：</span>${fmtTime(detail.revoked_at)}</div>`;
+    metaHtml += `<div><span class="mk">撤销人：</span>${detail.revoked_by_name || "-"}</div>`;
+  }
+  metaHtml += `</div>`;
+
+  let summaryHtml = `<div class="snap-summary">
+    <div class="ss-item"><div class="ss-num">${detail.total_count}</div><div class="ss-label">总计</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#1d7c4c;">${detail.imported_count}</div><div class="ss-label">成功</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#5a6780;">${detail.skipped_count}</div><div class="ss-label">跳过</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#a9312e;">${detail.rejected_count}</div><div class="ss-label">拒绝</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#d9534f;">${detail.failed_count}</div><div class="ss-label">失败</div></div>
+    <div class="ss-item"><div class="ss-num" style="color:#8893a7;">${detail.not_selected_count}</div><div class="ss-label">未勾选</div></div>
+    ${detail.revoked_count > 0 ? `<div class="ss-item"><div class="ss-num" style="color:#e67e22;">${detail.revoked_count}</div><div class="ss-label">已撤销</div></div>` : ""}
+  </div>`;
+
+  const actionMap = {
+    create: { label: "新建", cls: "snap-result-create" },
+    overwrite: { label: "覆盖", cls: "snap-result-overwrite" },
+    skip: { label: "跳过", cls: "snap-result-skip" },
+    reject: { label: "拒绝", cls: "snap-result-reject" },
+    not_selected: { label: "未勾选", cls: "snap-result-skip" },
+    error: { label: "异常", cls: "snap-result-error" },
+  };
+
+  let tblHtml = `<div class="snap-tbl-wrap"><table class="snap-tbl">
+    <thead><tr>
+      <th>工单号</th><th>操作</th><th>成功</th>
+      <th>恢复前状态</th><th>恢复后状态</th><th>是否已撤销</th><th>原因</th>
+    </tr></thead><tbody>`;
+
+  detail.items.forEach(item => {
+    const act = actionMap[item.action] || { label: item.action, cls: "" };
+    tblHtml += `<tr>
+      <td><strong>${item.order_no}</strong></td>
+      <td><span class="snap-result-tag ${act.cls}">${act.label}</span></td>
+      <td>${item.success ? "✅" : "❌"}</td>
+      <td>${item.before_status || "-"}</td>
+      <td>${item.after_status || "-"}</td>
+      <td>${item.is_revoked ? `<span style="color:#e67e22;font-size:12px;">是 · ${fmtTime(item.revoked_at)}</span>` : "否"}</td>
+      <td style="font-size:12px;color:#5a6780;max-width:300px;">
+        ${item.reason || "-"}
+        ${item.revoke_failed_reason ? `<br/><span style="color:#d9534f;">撤销失败：${item.revoke_failed_reason}</span>` : ""}
+      </td>
+    </tr>`;
+  });
+
+  tblHtml += `</tbody></table></div>`;
+
+  if (detail.revoke_reason) {
+    tblHtml += `<div style="margin-top:12px;padding:10px 14px;background:#fff8e1;border-radius:6px;font-size:12.5px;color:#856404;">
+      <strong>撤销原因：</strong>${detail.revoke_reason}
+    </div>`;
+  }
+
+  body.innerHTML = metaHtml + summaryHtml + tblHtml;
+
+  let footerHtml = `<button class="btn btn-ghost" onclick="closeModal('batchDetailModal')">关闭</button>`;
+  if (detail.status !== "revoked" && detail.imported_count > 0) {
+    footerHtml = `<button class="btn btn-warn" onclick="openRevokeBatch(${detail.id})">↩ 撤销本批次</button>` + footerHtml;
+  }
+  footer.innerHTML = footerHtml;
+}
+
+function openRevokeBatch(batchId) {
+  batchState.revokeBatchId = batchId;
+  $id("revokeReason").value = "";
+  openModal("revokeBatchModal");
+}
+
+async function confirmRevokeBatch() {
+  const reason = $id("revokeReason").value.trim();
+  if (!reason) { toast("请填写撤销原因", "err"); return; }
+
+  const batchId = batchState.revokeBatchId;
+  if (!batchId) return;
+
+  try {
+    const result = await api(`/restore-batches/${batchId}/revoke`, "POST", { reason });
+    toast(`✅ 撤销完成：成功 ${result.revoked} 条，失败 ${result.failed} 条`);
+    closeModal("revokeBatchModal");
+
+    if (batchState.currentBatchId === batchId) {
+      viewBatchDetail(batchId);
+    }
+    loadBatchList();
+    loadAll();
+  } catch (e) {}
+}
 
 // ---------- start ----------
 window.addEventListener("DOMContentLoaded", () => {

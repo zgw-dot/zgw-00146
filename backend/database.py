@@ -141,6 +141,72 @@ class StatusHistory(Base):
     order = relationship("WorkOrder", back_populates="histories")
 
 
+class RestoreBatchStatus(str, PyEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REVOKED = "revoked"
+    PARTIALLY_REVOKED = "partially_revoked"
+
+
+class RestoreBatchItemAction(str, PyEnum):
+    CREATE = "create"
+    OVERWRITE = "overwrite"
+    SKIP = "skip"
+    REJECT = "reject"
+    NOT_SELECTED = "not_selected"
+    ERROR = "error"
+
+
+class RestoreBatch(Base):
+    __tablename__ = "restore_batches"
+    id = Column(Integer, primary_key=True, index=True)
+    batch_no = Column(String(50), unique=True, nullable=False, index=True)
+    snapshot_version = Column(String(30))
+    snapshot_exported_at = Column(String(100))
+    snapshot_exported_by = Column(String(200))
+    operator_id = Column(Integer, nullable=False)
+    operator_name = Column(String(100))
+    status = Column(SAEnum(RestoreBatchStatus), default=RestoreBatchStatus.COMPLETED, nullable=False)
+    total_count = Column(Integer, default=0)
+    imported_count = Column(Integer, default=0)
+    skipped_count = Column(Integer, default=0)
+    rejected_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    not_selected_count = Column(Integer, default=0)
+    revoked_count = Column(Integer, default=0)
+    detail_summary = Column(Text)
+    raw_snapshot = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    revoked_at = Column(DateTime)
+    revoked_by_id = Column(Integer)
+    revoked_by_name = Column(String(100))
+    revoke_reason = Column(Text)
+
+    items = relationship("RestoreBatchItem", back_populates="batch",
+                         cascade="all, delete-orphan", lazy="selectin")
+
+
+class RestoreBatchItem(Base):
+    __tablename__ = "restore_batch_items"
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("restore_batches.id"), nullable=False, index=True)
+    order_no = Column(String(30), nullable=False, index=True)
+    action = Column(SAEnum(RestoreBatchItemAction), nullable=False)
+    success = Column(Boolean, default=False)
+    reason = Column(Text)
+    order_id = Column(Integer)
+    before_status = Column(String(50))
+    after_status = Column(String(50))
+    before_snapshot_json = Column(Text)
+    after_snapshot_json = Column(Text)
+    is_revoked = Column(Boolean, default=False)
+    revoked_at = Column(DateTime)
+    revoke_failed_reason = Column(Text)
+
+    batch = relationship("RestoreBatch", back_populates="items")
+
+
 def get_db():
     db = SessionLocal()
     try:

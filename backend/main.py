@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from database import (
     get_db, init_db, Role, OrderStatus, RiskLevel,
     User, Team, Vehicle, WorkOrder, StatusHistory, AuditLog,
+    RestoreBatch, RestoreBatchItem, RestoreBatchStatus, RestoreBatchItemAction,
 )
 
 
@@ -606,12 +607,30 @@ SNAPSHOT_VERSION = "1.0.0"
 
 @app.get("/api/export/json")
 def export_json(db: Session = Depends(get_db), user: User = Depends(_current_user)):
+    latest_batch = db.query(RestoreBatch).order_by(RestoreBatch.id.desc()).first()
+    batch_info = None
+    if latest_batch:
+        batch_info = {
+            "batch_id": latest_batch.id,
+            "batch_no": latest_batch.batch_no,
+            "snapshot_version": latest_batch.snapshot_version,
+            "operator_name": latest_batch.operator_name,
+            "created_at": latest_batch.created_at.isoformat() if latest_batch.created_at else None,
+            "status": latest_batch.status.value if hasattr(latest_batch.status, "value") else str(latest_batch.status),
+            "total_count": latest_batch.total_count,
+            "imported_count": latest_batch.imported_count,
+        }
+
     payload = {
         "snapshot_version": SNAPSHOT_VERSION,
         "exported_at": datetime.utcnow().isoformat(),
         "exported_by": {"id": user.id, "name": user.name, "role": user.role.value},
         "total": None,
         "orders": None,
+        "traceability": {
+            "last_restore_batch": batch_info,
+            "export_purpose": "snapshot_backup",
+        },
     }
     payload["orders"] = _serialize_orders_for_export(db)
     payload["total"] = len(payload["orders"])
@@ -662,6 +681,38 @@ def _parse_iso(val):
         return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _serialize_order_snapshot(o: WorkOrder) -> dict:
+    return {
+        "id": o.id,
+        "order_no": o.order_no,
+        "road": o.road,
+        "tree_no": o.tree_no,
+        "risk_level": o.risk_level.value if hasattr(o.risk_level, "value") else str(o.risk_level),
+        "suggested_time": o.suggested_time or "",
+        "need_road_close": o.need_road_close,
+        "description": o.description or "",
+        "status": o.status.value if hasattr(o.status, "value") else str(o.status),
+        "team_id": o.team_id,
+        "vehicle_id": o.vehicle_id,
+        "road_close_start": o.road_close_start.isoformat() if o.road_close_start else "",
+        "road_close_end": o.road_close_end.isoformat() if o.road_close_end else "",
+        "reported_at": o.reported_at.isoformat() if o.reported_at else "",
+        "assigned_at": o.assigned_at.isoformat() if o.assigned_at else "",
+        "started_at": o.started_at.isoformat() if o.started_at else "",
+        "submitted_at": o.submitted_at.isoformat() if o.submitted_at else "",
+        "reviewed_at": o.reviewed_at.isoformat() if o.reviewed_at else "",
+        "review_note": o.review_note or "",
+        "cancelled_at": o.cancelled_at.isoformat() if o.cancelled_at else "",
+        "cancel_reason": o.cancel_reason or "",
+    }
+
+
+def _generate_batch_no() -> str:
+    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+    rand = uuid.uuid4().hex[:6].upper()
+    return f"RST-{ts}-{rand}"
 
 
 def _detect_conflicts(item: dict, db: Session) -> List[dict]:
@@ -891,6 +942,8 @@ class SnapshotImportOut(BaseModel):
     rejected: int
     failed: int
     not_selected: int = 0
+    batch_id: Optional[int] = None
+    batch_no: Optional[str] = None
     items: List[SnapshotImportItemOut]
 
 
@@ -907,6 +960,7 @@ def snapshot_import(data: SnapshotImportIn,
             selected_map[s.order_no] = s.decision
 
     results = []
+    batch_items_data = []
     imported_count = 0
     skipped_count = 0
     rejected_count = 0
@@ -916,8 +970,30 @@ def snapshot_import(data: SnapshotImportIn,
     for item in data.orders:
         order_no = item.get("order_no", "")
 
+        existing = db.query(WorkOrder).filter(WorkOrder.order_no == order_no).first()
+        before_snap = None
+        before_status = None
+        if existing:
+            before_snap = _serialize_order_snapshot(existing)
+            before_status = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
+
+        batch_item = {
+            "order_no": order_no,
+            "action": None,
+            "success": False,
+            "reason": "",
+            "order_id": existing.id if existing else None,
+            "before_status": before_status,
+            "after_status": None,
+            "before_snapshot_json": json.dumps(before_snap, ensure_ascii=False) if before_snap else None,
+            "after_snapshot_json": None,
+        }
+
         if has_user_selection and order_no not in selected_map:
             not_selected_count += 1
+            batch_item["action"] = "not_selected"
+            batch_item["reason"] = "未勾选，不执行恢复"
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="not_selected", success=False,
                 reason="未勾选，不执行恢复",
@@ -930,6 +1006,12 @@ def snapshot_import(data: SnapshotImportIn,
         user_decision = selected_map.get(order_no) if has_user_selection else None
         if user_decision == "skip":
             skipped_count += 1
+            batch_item["action"] = "skip"
+            batch_item["success"] = True
+            batch_item["reason"] = "用户选择跳过"
+            batch_item["after_status"] = before_status
+            batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="skip", success=True,
                 reason="用户选择跳过",
@@ -941,6 +1023,11 @@ def snapshot_import(data: SnapshotImportIn,
         if decision == "reject":
             reject_reasons = "; ".join(c["message"] for c in conflicts if c.get("action") == "reject")
             rejected_count += 1
+            batch_item["action"] = "reject"
+            batch_item["reason"] = reject_reasons or "存在不可恢复冲突"
+            batch_item["after_status"] = before_status
+            batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="reject", success=False,
                 reason=reject_reasons or "存在不可恢复冲突",
@@ -950,13 +1037,17 @@ def snapshot_import(data: SnapshotImportIn,
         if decision == "skip":
             skip_reasons = "; ".join(c["message"] for c in conflicts if c.get("action") == "skip")
             skipped_count += 1
+            batch_item["action"] = "skip"
+            batch_item["success"] = True
+            batch_item["reason"] = skip_reasons or "终态记录自动跳过"
+            batch_item["after_status"] = before_status
+            batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="skip", success=True,
                 reason=skip_reasons or "终态记录自动跳过",
             ))
             continue
-
-        existing = db.query(WorkOrder).filter(WorkOrder.order_no == order_no).first()
 
         try:
             if existing and decision == "overwrite_or_skip":
@@ -965,6 +1056,11 @@ def snapshot_import(data: SnapshotImportIn,
                     snap_status = OrderStatus(snap_status_str)
                 except ValueError:
                     skipped_count += 1
+                    batch_item["action"] = "skip"
+                    batch_item["reason"] = f"快照状态「{snap_status_str}」无效"
+                    batch_item["after_status"] = before_status
+                    batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                    batch_items_data.append(batch_item)
                     results.append(SnapshotImportItemOut(
                         order_no=order_no, action="skip", success=False,
                         reason=f"快照状态「{snap_status_str}」无效",
@@ -976,6 +1072,11 @@ def snapshot_import(data: SnapshotImportIn,
 
                 if existing.status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
                     rejected_count += 1
+                    batch_item["action"] = "reject"
+                    batch_item["reason"] = f"当前工单状态为「{existing.status.value}」，禁止覆盖"
+                    batch_item["after_status"] = before_status
+                    batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                    batch_items_data.append(batch_item)
                     results.append(SnapshotImportItemOut(
                         order_no=order_no, action="reject", success=False,
                         reason=f"当前工单状态为「{existing.status.value}」，禁止覆盖",
@@ -984,6 +1085,11 @@ def snapshot_import(data: SnapshotImportIn,
 
                 if snap_rank < existing_rank:
                     skipped_count += 1
+                    batch_item["action"] = "skip"
+                    batch_item["reason"] = f"快照状态「{snap_status_str}」落后于当前「{existing.status.value}」，拒绝倒退覆盖"
+                    batch_item["after_status"] = before_status
+                    batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                    batch_items_data.append(batch_item)
                     results.append(SnapshotImportItemOut(
                         order_no=order_no, action="skip", success=False,
                         reason=f"快照状态「{snap_status_str}」落后于当前「{existing.status.value}」，拒绝倒退覆盖",
@@ -1013,6 +1119,11 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"队伍「{snap_team_name}」时间冲突，已被工单 {c.order_no} 占用"
+                        batch_item["after_status"] = before_status
+                        batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"队伍「{snap_team_name}」时间冲突，已被工单 {c.order_no} 占用",
@@ -1034,6 +1145,11 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"车辆「{snap_vehicle_plate}」排班冲突，已被工单 {c.order_no} 占用"
+                        batch_item["after_status"] = before_status
+                        batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"车辆「{snap_vehicle_plate}」排班冲突，已被工单 {c.order_no} 占用",
@@ -1056,6 +1172,11 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"路段「{road}」封路窗口冲突，已被工单 {c.order_no} 占用"
+                        batch_item["after_status"] = before_status
+                        batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"路段「{road}」封路窗口冲突，已被工单 {c.order_no} 占用",
@@ -1114,6 +1235,16 @@ def snapshot_import(data: SnapshotImportIn,
                 _record_history(db, existing, old_status_val, snap_status, user,
                                 note=f"快照恢复覆盖：从「{old_status_val}」恢复为「{snap_status.value}」")
 
+                db.flush()
+                after_snap = _serialize_order_snapshot(existing)
+                batch_item["action"] = "overwrite"
+                batch_item["success"] = True
+                batch_item["reason"] = f"覆盖恢复：{old_status_val} → {snap_status.value}"
+                batch_item["order_id"] = existing.id
+                batch_item["after_status"] = snap_status.value
+                batch_item["after_snapshot_json"] = json.dumps(after_snap, ensure_ascii=False)
+                batch_items_data.append(batch_item)
+
                 imported_count += 1
                 results.append(SnapshotImportItemOut(
                     order_no=order_no, action="overwrite", success=True,
@@ -1130,6 +1261,10 @@ def snapshot_import(data: SnapshotImportIn,
 
                 if snap_status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
                     skipped_count += 1
+                    batch_item["action"] = "skip"
+                    batch_item["success"] = True
+                    batch_item["reason"] = f"终态记录「{snap_status_str}」自动跳过"
+                    batch_items_data.append(batch_item)
                     results.append(SnapshotImportItemOut(
                         order_no=order_no, action="skip", success=True,
                         reason=f"终态记录「{snap_status_str}」自动跳过",
@@ -1158,6 +1293,9 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"队伍「{snap_team_name}」时间冲突，已被工单 {c.order_no} 占用"
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"队伍「{snap_team_name}」时间冲突，已被工单 {c.order_no} 占用",
@@ -1178,6 +1316,9 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"车辆「{snap_vehicle_plate}」排班冲突，已被工单 {c.order_no} 占用"
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"车辆「{snap_vehicle_plate}」排班冲突，已被工单 {c.order_no} 占用",
@@ -1199,6 +1340,9 @@ def snapshot_import(data: SnapshotImportIn,
                     ).first()
                     if c:
                         rejected_count += 1
+                        batch_item["action"] = "reject"
+                        batch_item["reason"] = f"路段「{road}」封路窗口冲突，已被工单 {c.order_no} 占用"
+                        batch_items_data.append(batch_item)
                         results.append(SnapshotImportItemOut(
                             order_no=order_no, action="reject", success=False,
                             reason=f"路段「{road}」封路窗口冲突，已被工单 {c.order_no} 占用",
@@ -1244,6 +1388,15 @@ def snapshot_import(data: SnapshotImportIn,
                 _record_history(db, new_order, None, snap_status, user,
                                 note=f"快照恢复新建工单")
 
+                after_snap = _serialize_order_snapshot(new_order)
+                batch_item["action"] = "create"
+                batch_item["success"] = True
+                batch_item["reason"] = f"新建工单，状态={snap_status.value}"
+                batch_item["order_id"] = new_order.id
+                batch_item["after_status"] = snap_status.value
+                batch_item["after_snapshot_json"] = json.dumps(after_snap, ensure_ascii=False)
+                batch_items_data.append(batch_item)
+
                 imported_count += 1
                 results.append(SnapshotImportItemOut(
                     order_no=order_no, action="create", success=True,
@@ -1252,6 +1405,12 @@ def snapshot_import(data: SnapshotImportIn,
                 continue
 
             skipped_count += 1
+            batch_item["action"] = "skip"
+            batch_item["success"] = True
+            batch_item["reason"] = "无匹配操作，自动跳过"
+            batch_item["after_status"] = before_status
+            batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="skip", success=True,
                 reason="无匹配操作，自动跳过",
@@ -1259,6 +1418,11 @@ def snapshot_import(data: SnapshotImportIn,
 
         except Exception as e:
             failed_count += 1
+            batch_item["action"] = "error"
+            batch_item["reason"] = str(e)
+            batch_item["after_status"] = before_status
+            batch_item["after_snapshot_json"] = batch_item["before_snapshot_json"]
+            batch_items_data.append(batch_item)
             results.append(SnapshotImportItemOut(
                 order_no=order_no, action="error", success=False,
                 reason=str(e),
@@ -1282,17 +1446,54 @@ def snapshot_import(data: SnapshotImportIn,
     if detail_parts:
         audit_detail += "; 失败详情: " + "; ".join(detail_parts[:10])
 
+    batch_no = _generate_batch_no()
+    batch = RestoreBatch(
+        batch_no=batch_no,
+        snapshot_version=data.snapshot_version,
+        snapshot_exported_at=data.exported_at,
+        snapshot_exported_by=json.dumps(data.exported_by, ensure_ascii=False) if data.exported_by else None,
+        operator_id=user.id,
+        operator_name=user.name,
+        status=RestoreBatchStatus.COMPLETED,
+        total_count=len(data.orders),
+        imported_count=imported_count,
+        skipped_count=skipped_count,
+        rejected_count=rejected_count,
+        failed_count=failed_count,
+        not_selected_count=not_selected_count,
+        detail_summary=audit_detail,
+        raw_snapshot=json.dumps({"orders": data.orders[:10]}, ensure_ascii=False),
+    )
+    db.add(batch)
+    db.flush()
+
+    for bi in batch_items_data:
+        item = RestoreBatchItem(
+            batch_id=batch.id,
+            order_no=bi["order_no"],
+            action=RestoreBatchItemAction(bi["action"]) if bi["action"] else RestoreBatchItemAction.SKIP,
+            success=bi["success"],
+            reason=bi["reason"],
+            order_id=bi["order_id"],
+            before_status=bi["before_status"],
+            after_status=bi["after_status"],
+            before_snapshot_json=bi["before_snapshot_json"],
+            after_snapshot_json=bi["after_snapshot_json"],
+        )
+        db.add(item)
+
     log = AuditLog(
         action="snapshot_import",
         operator_id=user.id,
         operator_name=user.name,
         target_type="snapshot",
-        target_id=data.exported_at or "unknown",
+        target_id=batch_no,
         detail=audit_detail,
         snapshot_version=data.snapshot_version,
     )
     db.add(log)
     db.commit()
+    db.refresh(batch)
 
     return SnapshotImportOut(
         total=len(data.orders),
@@ -1301,6 +1502,8 @@ def snapshot_import(data: SnapshotImportIn,
         rejected=rejected_count,
         failed=failed_count,
         not_selected=not_selected_count,
+        batch_id=batch.id,
+        batch_no=batch_no,
         items=results,
     )
 
@@ -1332,3 +1535,341 @@ def list_audit_logs(
     if action:
         q = q.filter(AuditLog.action == action)
     return q.limit(limit).all()
+
+
+# ---------- Restore Batch ----------
+
+class RestoreBatchItemOut(BaseModel):
+    id: int
+    batch_id: int
+    order_no: str
+    action: str
+    success: bool
+    reason: Optional[str]
+    order_id: Optional[int]
+    before_status: Optional[str]
+    after_status: Optional[str]
+    is_revoked: bool
+    revoked_at: Optional[datetime]
+    revoke_failed_reason: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class RestoreBatchOut(BaseModel):
+    id: int
+    batch_no: str
+    snapshot_version: Optional[str]
+    snapshot_exported_at: Optional[str]
+    snapshot_exported_by: Optional[str]
+    operator_id: int
+    operator_name: Optional[str]
+    status: str
+    total_count: int
+    imported_count: int
+    skipped_count: int
+    rejected_count: int
+    failed_count: int
+    not_selected_count: int
+    revoked_count: int
+    detail_summary: Optional[str]
+    created_at: datetime
+    revoked_at: Optional[datetime]
+    revoked_by_id: Optional[int]
+    revoked_by_name: Optional[str]
+    revoke_reason: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class RestoreBatchDetailOut(RestoreBatchOut):
+    items: List[RestoreBatchItemOut] = []
+
+
+class RevokeBatchIn(BaseModel):
+    reason: str = Field(..., min_length=1, description="撤销原因")
+
+
+class RevokeBatchItemOut(BaseModel):
+    order_no: str
+    action: str
+    success: bool
+    reason: str
+
+
+class RevokeBatchOut(BaseModel):
+    batch_id: int
+    batch_no: str
+    total_revocable: int
+    revoked: int
+    failed: int
+    status: str
+    items: List[RevokeBatchItemOut]
+
+
+@app.get("/api/restore-batches", response_model=List[RestoreBatchOut])
+def list_restore_batches(
+    limit: int = 50,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    q = db.query(RestoreBatch).order_by(RestoreBatch.id.desc())
+    if status:
+        try:
+            q = q.filter(RestoreBatch.status == RestoreBatchStatus(status))
+        except ValueError:
+            pass
+    return q.limit(limit).all()
+
+
+@app.get("/api/restore-batches/{batch_id}", response_model=RestoreBatchDetailOut)
+def get_restore_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    batch = db.query(RestoreBatch).filter(RestoreBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    items = []
+    for item in batch.items:
+        items.append(RestoreBatchItemOut(
+            id=item.id,
+            batch_id=item.batch_id,
+            order_no=item.order_no,
+            action=item.action.value if hasattr(item.action, "value") else str(item.action),
+            success=item.success,
+            reason=item.reason,
+            order_id=item.order_id,
+            before_status=item.before_status,
+            after_status=item.after_status,
+            is_revoked=item.is_revoked,
+            revoked_at=item.revoked_at,
+            revoke_failed_reason=item.revoke_failed_reason,
+        ))
+
+    return RestoreBatchDetailOut(
+        id=batch.id,
+        batch_no=batch.batch_no,
+        snapshot_version=batch.snapshot_version,
+        snapshot_exported_at=batch.snapshot_exported_at,
+        snapshot_exported_by=batch.snapshot_exported_by,
+        operator_id=batch.operator_id,
+        operator_name=batch.operator_name,
+        status=batch.status.value if hasattr(batch.status, "value") else str(batch.status),
+        total_count=batch.total_count,
+        imported_count=batch.imported_count,
+        skipped_count=batch.skipped_count,
+        rejected_count=batch.rejected_count,
+        failed_count=batch.failed_count,
+        not_selected_count=batch.not_selected_count,
+        revoked_count=batch.revoked_count,
+        detail_summary=batch.detail_summary,
+        created_at=batch.created_at,
+        revoked_at=batch.revoked_at,
+        revoked_by_id=batch.revoked_by_id,
+        revoked_by_name=batch.revoked_by_name,
+        revoke_reason=batch.revoke_reason,
+        items=items,
+    )
+
+
+def _check_order_modified_since(db: Session, order: WorkOrder, after_snap_json: str) -> tuple[bool, str]:
+    try:
+        after_snap = json.loads(after_snap_json) if after_snap_json else {}
+    except Exception:
+        return True, "无法解析恢复后快照，无法确认是否被修改"
+
+    current_snap = _serialize_order_snapshot(order)
+
+    ignore_fields = {"id", "order_no"}
+    changed_fields = []
+    for key in current_snap:
+        if key in ignore_fields:
+            continue
+        cur_val = current_snap.get(key)
+        snap_val = after_snap.get(key)
+        if cur_val != snap_val:
+            changed_fields.append(key)
+
+    if changed_fields:
+        return True, f"工单已被人工修改，变更字段: {', '.join(changed_fields[:5])}"
+    return False, ""
+
+
+@app.post("/api/restore-batches/{batch_id}/revoke", response_model=RevokeBatchOut)
+def revoke_restore_batch(
+    batch_id: int,
+    data: RevokeBatchIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+
+    batch = db.query(RestoreBatch).filter(RestoreBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    batch_status_val = batch.status.value if hasattr(batch.status, "value") else str(batch.status)
+    if batch_status_val == RestoreBatchStatus.REVOKED.value:
+        raise HTTPException(status_code=400, detail="该批次已全部撤销，无需重复操作")
+
+    revocable_items = [
+        item for item in batch.items
+        if item.success and item.action in (RestoreBatchItemAction.CREATE, RestoreBatchItemAction.OVERWRITE)
+        and not item.is_revoked
+    ]
+
+    if not revocable_items:
+        raise HTTPException(status_code=400, detail="该批次没有可撤销的工单（已全部撤销或均为跳过/拒绝）")
+
+    revoke_results = []
+    revoked_count = 0
+    failed_count = 0
+
+    for item in revocable_items:
+        order_no = item.order_no
+        action_val = item.action.value if hasattr(item.action, "value") else str(item.action)
+
+        order = db.query(WorkOrder).filter(WorkOrder.id == item.order_id).first() if item.order_id else None
+
+        if action_val == "create":
+            if not order:
+                item.is_revoked = True
+                item.revoked_at = datetime.utcnow()
+                item.revoke_failed_reason = "工单已不存在，视为已撤销"
+                revoked_count += 1
+                revoke_results.append(RevokeBatchItemOut(
+                    order_no=order_no, action="revoke_delete", success=True,
+                    reason="新建工单已不存在，视为已撤销",
+                ))
+                continue
+
+            db.delete(order)
+            item.is_revoked = True
+            item.revoked_at = datetime.utcnow()
+            revoked_count += 1
+            revoke_results.append(RevokeBatchItemOut(
+                order_no=order_no, action="revoke_delete", success=True,
+                reason="删除新建的工单，成功撤销",
+            ))
+
+        elif action_val == "overwrite":
+            if not order:
+                failed_count += 1
+                item.revoke_failed_reason = "被覆盖的工单已不存在，无法撤销"
+                revoke_results.append(RevokeBatchItemOut(
+                    order_no=order_no, action="revoke_skip", success=False,
+                    reason="被覆盖的工单已不存在，无法撤销",
+                ))
+                continue
+
+            modified, mod_reason = _check_order_modified_since(db, order, item.after_snapshot_json or "")
+            if modified:
+                failed_count += 1
+                item.revoke_failed_reason = mod_reason
+                revoke_results.append(RevokeBatchItemOut(
+                    order_no=order_no, action="revoke_skip", success=False,
+                    reason=mod_reason,
+                ))
+                continue
+
+            try:
+                before_snap = json.loads(item.before_snapshot_json) if item.before_snapshot_json else {}
+            except Exception:
+                failed_count += 1
+                item.revoke_failed_reason = "无法解析恢复前快照，无法回退"
+                revoke_results.append(RevokeBatchItemOut(
+                    order_no=order_no, action="revoke_skip", success=False,
+                    reason="无法解析恢复前快照，无法回退",
+                ))
+                continue
+
+            try:
+                if before_snap.get("risk_level"):
+                    order.risk_level = RiskLevel(before_snap["risk_level"])
+            except ValueError:
+                pass
+
+            order.road = before_snap.get("road", order.road)
+            order.tree_no = before_snap.get("tree_no", order.tree_no)
+            order.suggested_time = before_snap.get("suggested_time") or order.suggested_time
+            order.need_road_close = before_snap.get("need_road_close", order.need_road_close)
+            order.description = before_snap.get("description") or order.description
+
+            try:
+                status_val = before_snap.get("status")
+                if status_val:
+                    order.status = OrderStatus(status_val)
+            except ValueError:
+                pass
+
+            order.team_id = before_snap.get("team_id") or order.team_id
+            order.vehicle_id = before_snap.get("vehicle_id") or order.vehicle_id
+            order.road_close_start = _parse_iso(before_snap.get("road_close_start")) or order.road_close_start
+            order.road_close_end = _parse_iso(before_snap.get("road_close_end")) or order.road_close_end
+            order.reported_at = _parse_iso(before_snap.get("reported_at")) or order.reported_at
+            order.assigned_at = _parse_iso(before_snap.get("assigned_at")) or order.assigned_at
+            order.started_at = _parse_iso(before_snap.get("started_at")) or order.started_at
+            order.submitted_at = _parse_iso(before_snap.get("submitted_at")) or order.submitted_at
+            order.reviewed_at = _parse_iso(before_snap.get("reviewed_at")) or order.reviewed_at
+            order.review_note = before_snap.get("review_note") or order.review_note
+            order.cancelled_at = _parse_iso(before_snap.get("cancelled_at")) or order.cancelled_at
+            order.cancel_reason = before_snap.get("cancel_reason") or order.cancel_reason
+
+            db.query(StatusHistory).filter(StatusHistory.order_id == order.id).delete()
+
+            _record_history(db, order, item.after_status, order.status, user,
+                            note=f"批次撤销回退：从「{item.after_status}」回退为「{order.status.value}」")
+
+            item.is_revoked = True
+            item.revoked_at = datetime.utcnow()
+            revoked_count += 1
+            revoke_results.append(RevokeBatchItemOut(
+                order_no=order_no, action="revoke_restore", success=True,
+                reason=f"回退到恢复前状态：{item.after_status} → {order.status.value}",
+            ))
+
+    batch.revoked_count = (batch.revoked_count or 0) + revoked_count
+
+    total_revocable = sum(1 for item in batch.items
+                          if item.success and item.action in (RestoreBatchItemAction.CREATE, RestoreBatchItemAction.OVERWRITE))
+    total_revoked = sum(1 for item in batch.items if item.is_revoked)
+
+    if total_revoked >= total_revocable:
+        batch.status = RestoreBatchStatus.REVOKED
+    elif total_revoked > 0:
+        batch.status = RestoreBatchStatus.PARTIALLY_REVOKED
+
+    batch.revoked_at = datetime.utcnow()
+    batch.revoked_by_id = user.id
+    batch.revoked_by_name = user.name
+    batch.revoke_reason = data.reason.strip()
+
+    log = AuditLog(
+        action="snapshot_revoke",
+        operator_id=user.id,
+        operator_name=user.name,
+        target_type="restore_batch",
+        target_id=batch.batch_no,
+        detail=f"撤销批次 {batch.batch_no}: 可撤销={len(revocable_items)}, 成功={revoked_count}, 失败={failed_count}, 原因={data.reason}",
+        snapshot_version=batch.snapshot_version,
+    )
+    db.add(log)
+    db.commit()
+
+    return RevokeBatchOut(
+        batch_id=batch.id,
+        batch_no=batch.batch_no,
+        total_revocable=len(revocable_items),
+        revoked=revoked_count,
+        failed=failed_count,
+        status=batch.status.value if hasattr(batch.status, "value") else str(batch.status),
+        items=revoke_results,
+    )
