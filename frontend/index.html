@@ -1155,19 +1155,28 @@ function snapToggleAll(cb) {
 }
 
 function goSnapStep3() {
+  const r = snapState.precheckResult;
+  const checked = [];
+  document.querySelectorAll(".snap-cb:checked").forEach(cb => {
+    checked.push(parseInt(cb.dataset.idx));
+  });
+  if (checked.length === 0) {
+    toast("请至少勾选一条工单进行恢复", "err"); return;
+  }
+  snapState.selectedIndices = checked;
   snapState.step = 3;
   renderSnapshotStep();
 }
 
 function renderSnapStep3(body, footer) {
   const r = snapState.precheckResult;
-  const checkedIndices = [];
-  document.querySelectorAll(".snap-cb:checked").forEach(cb => {
-    checkedIndices.push(parseInt(cb.dataset.idx));
-  });
+  const checkedIndices = snapState.selectedIndices || [];
 
   if (checkedIndices.length === 0) {
-    toast("请至少勾选一条工单进行恢复", "err"); return;
+    toast("请至少勾选一条工单进行恢复", "err");
+    snapState.step = 2;
+    renderSnapshotStep();
+    return;
   }
 
   let html = renderStepBar(3);
@@ -1235,13 +1244,17 @@ async function doSnapImport() {
   const d = snapState.fileData;
 
   const selected = [];
-  document.querySelectorAll(".snap-cb:checked").forEach(cb => {
-    const idx = parseInt(cb.dataset.idx);
+  const checkedIndices = snapState.selectedIndices || [];
+  checkedIndices.forEach(idx => {
     const item = r.items[idx];
     const selEl = document.querySelector(`.snap-user-select[data-order="${item.order_no}"]`);
     const decision = selEl ? selEl.value : item.decision;
     selected.push({ order_no: item.order_no, decision });
   });
+
+  if (selected.length === 0) {
+    toast("请至少勾选一条工单进行恢复", "err"); return;
+  }
 
   const body = $id("snapshotBody");
   const footer = $id("snapshotFooter");

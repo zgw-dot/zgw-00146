@@ -901,7 +901,7 @@ def snapshot_import(data: SnapshotImportIn,
     _require_role(user, Role.ADMIN)
 
     selected_map = {}
-    has_user_selection = bool(data.selected)
+    has_user_selection = data.selected is not None
     if data.selected:
         for s in data.selected:
             selected_map[s.order_no] = s.decision
