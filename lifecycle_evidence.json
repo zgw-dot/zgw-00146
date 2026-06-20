@@ -1,0 +1,84 @@
+{
+  "test_run_at": "2026-06-20T02:56:30.628812",
+  "case1_service_down_before_start": {
+    "port_open_before_test": false,
+    "health_before_start": {
+      "type": "ConnectionError",
+      "str": "HTTPConnectionPool(host='127.0.0.1', port=8005): Max retries exceeded with url: /api/health (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x000001D6A16CBCB0>, 'Connection"
+    }
+  },
+  "first_start": {
+    "pid": 12876,
+    "cmd": "C:\\Python313\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8005",
+    "cwd": "D:\\workSpace\\AI__SPACE\\02-label\\zgw-00146\\backend",
+    "log_file": "D:\\workSpace\\AI__SPACE\\02-label\\zgw-00146\\server_run1.log",
+    "health_startup_time": "2026-06-20T02:56:34.107236",
+    "health_pid": 12876,
+    "health_ok": true
+  },
+  "case2_main_chain": {
+    "order_no": "WO202606201056354F21",
+    "admin_task_id": 34,
+    "admin_task_no": "VFY-20260620105635-885DC4",
+    "insp_task_id": 35,
+    "insp_task_no": "VFY-20260620105635-94E0DE",
+    "admin_task_event_count": 3,
+    "admin_task_conflict_count": 1,
+    "admin_can_see_batch": true,
+    "insp_can_see_batch": false
+  },
+  "stop_service": {
+    "pid_stopped": 12876,
+    "method": "Stop-Process -Id <single_pid> (Windows)",
+    "port_closed_after_stop": true
+  },
+  "case3_service_down_after_stop": {
+    "health_after_stop": {
+      "type": "ConnectionError",
+      "str": "HTTPConnectionPool(host='127.0.0.1', port=8005): Max retries exceeded with url: /api/health (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x000001D6A17B1940>, 'Connection"
+    }
+  },
+  "second_start": {
+    "pid": 56880,
+    "cmd": "C:\\Python313\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8005",
+    "cwd": "D:\\workSpace\\AI__SPACE\\02-label\\zgw-00146\\backend",
+    "log_file": "D:\\workSpace\\AI__SPACE\\02-label\\zgw-00146\\server_run2.log",
+    "health_startup_time": "2026-06-20T02:56:39.482070",
+    "health_pid": 56880,
+    "health_ok": true
+  },
+  "case4_cross_restart_consistency": {
+    "startup1": "2026-06-20T02:56:34.107236",
+    "startup2": "2026-06-20T02:56:39.482070",
+    "pid1_popen": 12876,
+    "pid2_popen": 56880,
+    "startup_time_diff": true,
+    "pid_diff": true,
+    "admin_task_event_count_before": 3,
+    "admin_task_event_count_after": 3,
+    "admin_task_conflict_count_before": 1,
+    "admin_task_conflict_count_after": 1,
+    "admin_can_see_batch_before": true,
+    "admin_can_see_batch_after": true,
+    "insp_can_see_batch_before": false,
+    "insp_can_see_batch_after": false,
+    "field_equality": {
+      "event_count": true,
+      "conflict_count": true,
+      "status": true,
+      "rerun_count": true,
+      "export_count": true,
+      "failed_event_count": true,
+      "batch_count": true
+    },
+    "eq_admin_can_see": true,
+    "eq_insp_can_see": true
+  },
+  "case5_restart_verdict": {
+    "passed": true,
+    "reason": "全部满足: startup不同 + PID不同 + 业务字段一致 + 权限不漂移"
+  },
+  "cleanup": {
+    "pid2_stopped": true
+  }
+}

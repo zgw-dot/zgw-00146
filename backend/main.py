@@ -24,6 +24,9 @@ from database import (
 
 app = FastAPI(title="城市树木修剪工单系统", version="1.0.0")
 
+APP_STARTUP_TIME = datetime.utcnow().isoformat()
+APP_STARTUP_PID = os.getpid()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -789,7 +792,12 @@ def export_json(db: Session = Depends(get_db), user: User = Depends(_current_use
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "time": datetime.utcnow().isoformat()}
+    return {
+        "ok": True,
+        "time": datetime.utcnow().isoformat(),
+        "startup_time": APP_STARTUP_TIME,
+        "pid": APP_STARTUP_PID,
+    }
 
 
 # ---------- Snapshot Restore ----------
