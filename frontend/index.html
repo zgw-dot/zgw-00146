@@ -2509,8 +2509,13 @@ function renderVfyDetailTab() {
 
   html += `<div class="vfy-actions" style="margin-bottom:14px;">
     <button class="btn btn-secondary" onclick="rerunVfyTask()">🔄 重新校验</button>
-    <button class="btn btn-warn" onclick="exportVfyJson()">⬇ 导出 JSON 审计包</button>
-    <button class="btn btn-warn" onclick="exportVfyCsv()">⬇ 导出 CSV</button>
+    ${state.currentUser && state.currentUser.role === 'admin' ? `
+      <button class="btn btn-warn" onclick="exportVfyJson()">⬇ 导出 JSON 审计包</button>
+      <button class="btn btn-warn" onclick="exportVfyCsv()">⬇ 导出 CSV</button>
+    ` : `
+      <button class="btn btn-warn" disabled title="巡查员不可导出审计包，仅管理员可导出">⬇ 导出 JSON 审计包</button>
+      <button class="btn btn-warn" disabled title="巡查员不可导出审计包，仅管理员可导出">⬇ 导出 CSV</button>
+    `}
     <button class="btn btn-ghost" onclick="switchVfyTab('list')">← 返回列表</button>
   </div>`;
 
@@ -2563,7 +2568,7 @@ function renderVfyDetailTab() {
 
   if (!canSeeBatch) {
     html += `<div style="padding:8px 12px;background:#fff8e1;border-radius:6px;font-size:12px;color:#856404;margin-bottom:12px;">
-      ⚠ 您是巡查员，已隐藏批量操作的详细信息。管理员可见完整内容。
+      ⚠ 您是巡查员，已隐藏批量操作的详细信息（管理员可见完整内容）。导出审计包功能仅限管理员使用。
     </div>`;
   }
 
@@ -2745,11 +2750,19 @@ async function rerunVfyTask() {
 
 function exportVfyJson() {
   if (!vfyState.currentTaskId) return;
+  if (state.currentUser && state.currentUser.role !== 'admin') {
+    toast("权限不足：巡查员不可导出审计包，仅管理员可导出", "err");
+    return;
+  }
   downloadWithAuth(`/verification/tasks/${vfyState.currentTaskId}/export/json`, `verification_${vfyState.currentTaskId}.json`);
 }
 
 function exportVfyCsv() {
   if (!vfyState.currentTaskId) return;
+  if (state.currentUser && state.currentUser.role !== 'admin') {
+    toast("权限不足：巡查员不可导出审计包，仅管理员可导出", "err");
+    return;
+  }
   downloadWithAuth(`/verification/tasks/${vfyState.currentTaskId}/export/csv`, `verification_${vfyState.currentTaskId}.csv`);
 }
 

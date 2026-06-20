@@ -2591,6 +2591,79 @@ def export_order_trace_csv(
 
 # ========== Verification Console (校验台) ==========
 
+VFY_ACTION_CREATE = "create"
+VFY_ACTION_VIEW = "view"
+VFY_ACTION_RERUN = "rerun"
+VFY_ACTION_EXPORT = "export"
+
+
+def _check_vfy_permission(user: User, task: Optional[VerificationTask], action: str):
+    if user.role == Role.ADMIN:
+        return
+    if action == VFY_ACTION_EXPORT:
+        raise HTTPException(status_code=403, detail="权限不足：巡查员不可导出审计包，仅管理员可导出")
+    if action == VFY_ACTION_CREATE:
+        raise HTTPException(status_code=403, detail="权限不足：只有管理员可按批次校验")
+    if task is not None and task.operator_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足：只能操作自己创建的校验任务")
+
+
+def _apply_result_desensitization(result: dict, viewer: User) -> dict:
+    is_admin = viewer.role == Role.ADMIN
+    can_see = is_admin
+    result["can_see_batch_detail"] = can_see
+    if can_see:
+        return result
+    events = result.get("events") or []
+    for e in events:
+        if e.get("is_batch_operation"):
+            e["changed_fields"] = None
+            e["before_snapshot"] = None
+            e["after_snapshot"] = None
+            e["diffs"] = None
+            e["batch_id"] = None
+            e["batch_no"] = None
+            e["fail_reason"] = None
+    all_events = result.get("all_events")
+    if all_events:
+        for e in all_events:
+            if e.get("is_batch_operation"):
+                e["changed_fields"] = None
+                e["before_snapshot"] = None
+                e["after_snapshot"] = None
+                e["diffs"] = None
+                e["batch_id"] = None
+                e["batch_no"] = None
+                e["fail_reason"] = None
+    return result
+
+
+def _parse_task_result(task: VerificationTask) -> Optional[dict]:
+    if not task.result_json:
+        return None
+    try:
+        return json.loads(task.result_json)
+    except Exception:
+        return None
+
+
+def _update_task_counts(task: VerificationTask, result: dict):
+    summary = result.get("summary", {})
+    task.result_summary = (
+        f"事件数:{summary.get('total_events', 0)}, "
+        f"冲突数:{summary.get('conflict_count', 0)}, "
+        f"批次数:{summary.get('batch_count', 0)}"
+    )
+    task.result_json = json.dumps(result, ensure_ascii=False)
+    task.conflict_count = summary.get("conflict_count", 0)
+    task.event_count = summary.get("total_events", 0)
+    task.failed_event_count = summary.get("failed_count", 0)
+    task.batch_count = summary.get("batch_count", 0)
+    task.status = VerificationStatus.COMPLETED
+    task.completed_at = datetime.utcnow()
+    task.error_message = None
+
+
 def _get_config_value(db: Session, key: str, default=None):
     cfg = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
     if not cfg:
@@ -2804,13 +2877,11 @@ def _run_verification_for_order(db: Session, order: WorkOrder, user: User) -> di
     if not is_admin and not is_reporter:
         raise HTTPException(status_code=403, detail="权限不足：只能校验自己提交的工单")
 
-    can_see_batch_detail = is_admin
-
     traces = db.query(OrderTrace).filter(OrderTrace.order_id == order.id).order_by(
         OrderTrace.created_at.asc(), OrderTrace.id.asc()
     ).all()
 
-    return _build_verification_result(order, traces, can_see_batch_detail)
+    return _build_verification_result(order, traces, True)
 
 
 def _run_verification_for_batch(db: Session, batch_id: int, user: User) -> dict:
@@ -3009,6 +3080,34 @@ class UpdateSystemConfigIn(BaseModel):
     config_value: str
 
 
+def _task_to_out(task: VerificationTask, result_dict: Optional[dict] = None) -> VerificationTaskDetailOut:
+    return VerificationTaskDetailOut(
+        id=task.id,
+        task_no=task.task_no,
+        task_type=task.task_type,
+        target_order_no=task.target_order_no,
+        target_order_id=task.target_order_id,
+        target_batch_id=task.target_batch_id,
+        target_batch_no=task.target_batch_no,
+        status=task.status.value if hasattr(task.status, "value") else str(task.status),
+        operator_id=task.operator_id,
+        operator_name=task.operator_name,
+        result_summary=task.result_summary,
+        conflict_count=task.conflict_count,
+        event_count=task.event_count,
+        failed_event_count=task.failed_event_count,
+        batch_count=task.batch_count,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        completed_at=task.completed_at,
+        rerun_count=task.rerun_count,
+        last_rerun_at=task.last_rerun_at,
+        export_count=task.export_count,
+        last_export_at=task.last_export_at,
+        result=result_dict,
+    )
+
+
 # ---- Verification APIs ----
 
 @app.post("/api/verification/tasks", response_model=VerificationTaskDetailOut)
@@ -3033,8 +3132,7 @@ def create_verification_task(
             raise HTTPException(status_code=403, detail="权限不足：只能校验自己提交的工单")
 
     elif data.task_type == "batch_trace":
-        if user.role != Role.ADMIN:
-            raise HTTPException(status_code=403, detail="权限不足：只有管理员可按批次校验")
+        _check_vfy_permission(user, None, VFY_ACTION_CREATE)
 
         if data.batch_id:
             target_batch = db.query(RestoreBatch).filter(RestoreBatch.id == data.batch_id).first()
@@ -3068,19 +3166,7 @@ def create_verification_task(
         else:
             result = {}
 
-        summary = result.get("summary", {})
-        task.result_summary = (
-            f"事件数:{summary.get('total_events', 0)}, "
-            f"冲突数:{summary.get('conflict_count', 0)}, "
-            f"批次数:{summary.get('batch_count', 0)}"
-        )
-        task.result_json = json.dumps(result, ensure_ascii=False)
-        task.conflict_count = summary.get("conflict_count", 0)
-        task.event_count = summary.get("total_events", 0)
-        task.failed_event_count = summary.get("failed_count", 0)
-        task.batch_count = summary.get("batch_count", 0)
-        task.status = VerificationStatus.COMPLETED
-        task.completed_at = datetime.utcnow()
+        _update_task_counts(task, result)
 
         log = AuditLog(
             action="verification_create",
@@ -3102,38 +3188,10 @@ def create_verification_task(
         db.commit()
         db.refresh(task)
 
-    result_dict = None
-    if task.result_json:
-        try:
-            result_dict = json.loads(task.result_json)
-        except Exception:
-            result_dict = None
-
-    return VerificationTaskDetailOut(
-        id=task.id,
-        task_no=task.task_no,
-        task_type=task.task_type,
-        target_order_no=task.target_order_no,
-        target_order_id=task.target_order_id,
-        target_batch_id=task.target_batch_id,
-        target_batch_no=task.target_batch_no,
-        status=task.status.value if hasattr(task.status, "value") else str(task.status),
-        operator_id=task.operator_id,
-        operator_name=task.operator_name,
-        result_summary=task.result_summary,
-        conflict_count=task.conflict_count,
-        event_count=task.event_count,
-        failed_event_count=task.failed_event_count,
-        batch_count=task.batch_count,
-        error_message=task.error_message,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-        rerun_count=task.rerun_count,
-        last_rerun_at=task.last_rerun_at,
-        export_count=task.export_count,
-        last_export_at=task.last_export_at,
-        result=result_dict,
-    )
+    result_dict = _parse_task_result(task)
+    if result_dict:
+        result_dict = _apply_result_desensitization(result_dict, user)
+    return _task_to_out(task, result_dict)
 
 
 @app.get("/api/verification/tasks", response_model=List[VerificationTaskOut])
@@ -3200,41 +3258,12 @@ def get_verification_task(
     if not task:
         raise HTTPException(status_code=404, detail="校验任务不存在")
 
-    if user.role != Role.ADMIN and task.operator_id != user.id:
-        raise HTTPException(status_code=403, detail="权限不足：只能查看自己创建的校验任务")
+    _check_vfy_permission(user, task, VFY_ACTION_VIEW)
 
-    result_dict = None
-    if task.result_json:
-        try:
-            result_dict = json.loads(task.result_json)
-        except Exception:
-            result_dict = None
-
-    return VerificationTaskDetailOut(
-        id=task.id,
-        task_no=task.task_no,
-        task_type=task.task_type,
-        target_order_no=task.target_order_no,
-        target_order_id=task.target_order_id,
-        target_batch_id=task.target_batch_id,
-        target_batch_no=task.target_batch_no,
-        status=task.status.value if hasattr(task.status, "value") else str(task.status),
-        operator_id=task.operator_id,
-        operator_name=task.operator_name,
-        result_summary=task.result_summary,
-        conflict_count=task.conflict_count,
-        event_count=task.event_count,
-        failed_event_count=task.failed_event_count,
-        batch_count=task.batch_count,
-        error_message=task.error_message,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-        rerun_count=task.rerun_count,
-        last_rerun_at=task.last_rerun_at,
-        export_count=task.export_count,
-        last_export_at=task.last_export_at,
-        result=result_dict,
-    )
+    result_dict = _parse_task_result(task)
+    if result_dict:
+        result_dict = _apply_result_desensitization(result_dict, user)
+    return _task_to_out(task, result_dict)
 
 
 @app.post("/api/verification/tasks/{task_id}/rerun", response_model=VerificationTaskDetailOut)
@@ -3248,8 +3277,7 @@ def rerun_verification_task(
     if not task:
         raise HTTPException(status_code=404, detail="校验任务不存在")
 
-    if user.role != Role.ADMIN and task.operator_id != user.id:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _check_vfy_permission(user, task, VFY_ACTION_RERUN)
 
     task.status = VerificationStatus.RUNNING
     task.rerun_count = (task.rerun_count or 0) + 1
@@ -3271,20 +3299,7 @@ def rerun_verification_task(
         else:
             result = {}
 
-        summary = result.get("summary", {})
-        task.result_summary = (
-            f"事件数:{summary.get('total_events', 0)}, "
-            f"冲突数:{summary.get('conflict_count', 0)}, "
-            f"批次数:{summary.get('batch_count', 0)}"
-        )
-        task.result_json = json.dumps(result, ensure_ascii=False)
-        task.conflict_count = summary.get("conflict_count", 0)
-        task.event_count = summary.get("total_events", 0)
-        task.failed_event_count = summary.get("failed_count", 0)
-        task.batch_count = summary.get("batch_count", 0)
-        task.status = VerificationStatus.COMPLETED
-        task.completed_at = datetime.utcnow()
-        task.error_message = None
+        _update_task_counts(task, result)
 
         log = AuditLog(
             action="verification_rerun",
@@ -3305,38 +3320,10 @@ def rerun_verification_task(
         db.commit()
         db.refresh(task)
 
-    result_dict = None
-    if task.result_json:
-        try:
-            result_dict = json.loads(task.result_json)
-        except Exception:
-            result_dict = None
-
-    return VerificationTaskDetailOut(
-        id=task.id,
-        task_no=task.task_no,
-        task_type=task.task_type,
-        target_order_no=task.target_order_no,
-        target_order_id=task.target_order_id,
-        target_batch_id=task.target_batch_id,
-        target_batch_no=task.target_batch_no,
-        status=task.status.value if hasattr(task.status, "value") else str(task.status),
-        operator_id=task.operator_id,
-        operator_name=task.operator_name,
-        result_summary=task.result_summary,
-        conflict_count=task.conflict_count,
-        event_count=task.event_count,
-        failed_event_count=task.failed_event_count,
-        batch_count=task.batch_count,
-        error_message=task.error_message,
-        created_at=task.created_at,
-        completed_at=task.completed_at,
-        rerun_count=task.rerun_count,
-        last_rerun_at=task.last_rerun_at,
-        export_count=task.export_count,
-        last_export_at=task.last_export_at,
-        result=result_dict,
-    )
+    result_dict = _parse_task_result(task)
+    if result_dict:
+        result_dict = _apply_result_desensitization(result_dict, user)
+    return _task_to_out(task, result_dict)
 
 
 @app.get("/api/verification/tasks/{task_id}/export/json")
@@ -3352,8 +3339,7 @@ def export_verification_json(
     if not task:
         raise HTTPException(status_code=404, detail="校验任务不存在")
 
-    if user.role != Role.ADMIN and task.operator_id != user.id:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _check_vfy_permission(user, task, VFY_ACTION_EXPORT)
 
     if not task.result_json:
         raise HTTPException(status_code=400, detail="校验任务无结果数据")
@@ -3362,6 +3348,8 @@ def export_verification_json(
         result = json.loads(task.result_json)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"结果解析失败: {e}")
+
+    result = _apply_result_desensitization(result, user)
 
     task.export_count = (task.export_count or 0) + 1
     task.last_export_at = datetime.utcnow()
@@ -3404,8 +3392,7 @@ def export_verification_csv(
     if not task:
         raise HTTPException(status_code=404, detail="校验任务不存在")
 
-    if user.role != Role.ADMIN and task.operator_id != user.id:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _check_vfy_permission(user, task, VFY_ACTION_EXPORT)
 
     if not task.result_json:
         raise HTTPException(status_code=400, detail="校验任务无结果数据")
@@ -3414,6 +3401,9 @@ def export_verification_csv(
         result = json.loads(task.result_json)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"结果解析失败: {e}")
+
+    result = _apply_result_desensitization(result, user)
+    can_see_batch = result.get("can_see_batch_detail", False)
 
     events = result.get("events", [])
     if not events and task.task_type == "batch_trace":
@@ -3433,7 +3423,7 @@ def export_verification_csv(
             "to_status": e.get("to_status", ""),
             "changed_fields": ", ".join(e.get("changed_fields", [])) if e.get("changed_fields") else "",
             "is_batch_operation": "是" if e.get("is_batch_operation") else "否",
-            "batch_no": e.get("batch_no", "") if task.task_type != "order_trace" or result.get("can_see_batch_detail") else "",
+            "batch_no": e.get("batch_no", "") if can_see_batch else "",
             "success": "成功" if e.get("success") else "失败",
             "fail_reason": e.get("fail_reason", "") if e.get("success") is False else "",
             "note": e.get("note", ""),
