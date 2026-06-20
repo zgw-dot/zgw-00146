@@ -457,6 +457,232 @@
     background: #f9fafc;
     cursor: pointer;
   }
+
+  /* ===== Trace Center ===== */
+  .trace-tabs-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e4e8ef;
+    margin-bottom: 14px;
+  }
+  .trace-tab {
+    padding: 8px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: #5a6780;
+    font-weight: 500;
+  }
+  .trace-tab.active {
+    color: #2f8f5f;
+    border-bottom-color: #2f8f5f;
+  }
+
+  .trace-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .trace-summary {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .trace-summary .ts-item {
+    background: #f4f6fa;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .trace-summary .ts-item .ts-num {
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  /* Timeline */
+  .trace-timeline {
+    position: relative;
+    padding-left: 28px;
+  }
+  .trace-timeline::before {
+    content: "";
+    position: absolute;
+    left: 9px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: linear-gradient(180deg, #2f8f5f 0%, #cbd5e1 100%);
+  }
+  .trace-event {
+    position: relative;
+    margin-bottom: 16px;
+    background: #fff;
+    border: 1px solid #e4e8ef;
+    border-radius: 8px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.03);
+  }
+  .trace-event::before {
+    content: "";
+    position: absolute;
+    left: -24px;
+    top: 16px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 3px solid #2f8f5f;
+    box-shadow: 0 0 0 3px rgba(47,143,95,.15);
+  }
+  .trace-event.fail::before {
+    border-color: #d9534f;
+    box-shadow: 0 0 0 3px rgba(217,83,79,.15);
+  }
+  .trace-event.batch::before {
+    border-color: #8e44ad;
+    box-shadow: 0 0 0 3px rgba(142,68,173,.15);
+  }
+
+  .trace-event-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .trace-event-title {
+    font-weight: 600;
+    font-size: 13.5px;
+    color: #2b3445;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .trace-event-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .t-tag-type-report { background: #d5f0e2; color: #1d7c4c; }
+  .t-tag-type-assign, .t-tag-type-reassign { background: #cfe2ff; color: #084298; }
+  .t-tag-type-cancel { background: #fad4d3; color: #a9312e; }
+  .t-tag-type-start, .t-tag-type-submit, .t-tag-type-complete { background: #fff3cd; color: #856404; }
+  .t-tag-type-snapshot { background: #e8d9f5; color: #5a2a8e; }
+  .t-tag-type-batch_revoke { background: #f5d5cf; color: #92400e; }
+
+  .trace-event-meta {
+    font-size: 12px;
+    color: #8893a7;
+  }
+  .trace-event-body {
+    font-size: 12.5px;
+    color: #445068;
+    margin-top: 4px;
+  }
+  .trace-event-body .status-flow {
+    display: inline-block;
+    font-weight: 600;
+    color: #2f8f5f;
+    margin: 2px 0;
+  }
+  .trace-event-body .note-text {
+    background: #f9fafc;
+    border-left: 3px solid #cbd5e1;
+    padding: 5px 10px;
+    border-radius: 0 4px 4px 0;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #5a6780;
+  }
+  .trace-event-body .fail-text {
+    color: #d9534f;
+    background: #fdecea;
+    border-left: 3px solid #d9534f;
+    padding: 5px 10px;
+    border-radius: 0 4px 4px 0;
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .trace-event-body .changed-fields {
+    margin-top: 6px;
+    font-size: 11.5px;
+  }
+  .trace-event-body .changed-fields span {
+    display: inline-block;
+    background: #eef1f6;
+    color: #445068;
+    padding: 1px 7px;
+    border-radius: 3px;
+    margin: 1px 2px;
+  }
+  .trace-event-body .batch-info {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #8e44ad;
+    font-weight: 500;
+  }
+
+  .diff-toggle {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #4b6cb7;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .diff-panel {
+    margin-top: 8px;
+    background: #f9fafc;
+    border: 1px solid #e4e8ef;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .diff-panel table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .diff-panel th {
+    background: #eef1f6;
+    padding: 6px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: #445068;
+    font-size: 11.5px;
+    border-bottom: 1px solid #e4e8ef;
+  }
+  .diff-panel td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #eef1f6;
+    vertical-align: top;
+    max-width: 240px;
+    word-break: break-all;
+  }
+  .diff-panel td.before { color: #a9312e; background: #fdecea; }
+  .diff-panel td.after { color: #1d7c4c; background: #d5f0e2; }
+  .diff-panel td.field { font-weight: 500; color: #445068; width: 140px; }
+
+  .trace-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: #8893a7;
+    background: #fafbfd;
+    border-radius: 8px;
+    border: 1px dashed #e4e8ef;
+  }
+  .trace-loading {
+    padding: 30px;
+    text-align: center;
+    color: #8893a7;
+  }
+  .detail-wide { max-width: 880px !important; }
 </style>
 </head>
 <body>
@@ -958,55 +1184,211 @@ async function submitCancel() {
   } catch (e) {}
 }
 
-// ---------- detail ----------
-function openDetail(id) {
-  const o = state.orders.find(x => x.id === id);
-  if (!o) return;
+// ---------- detail + trace ----------
+const detailState = {
+  currentOrderId: null,
+  currentTab: "info",
+  traceData: null,
+};
+
+function _getEventTypeTagClass(t) {
+  if (t.startsWith("snapshot")) return "t-tag-type-snapshot";
+  if (t.startsWith("batch_revoke")) return "t-tag-type-batch_revoke";
+  if (t === "cancel") return "t-tag-type-cancel";
+  if (["assign", "reassign"].includes(t)) return "t-tag-type-assign";
+  if (t === "report") return "t-tag-type-report";
+  return "t-tag-type-start";
+}
+
+function _getEventBadgeClass(e) {
+  let cls = "";
+  if (!e.success) cls += " fail";
+  if (e.is_batch_operation) cls += " batch";
+  return cls;
+}
+
+function _formatVal(v) {
+  if (v === null || v === undefined || v === "") return "<em style='color:#aaa;'>（空）</em>";
+  if (typeof v === "boolean") return v ? "是" : "否";
+  return String(v);
+}
+
+function renderTraceTimeline() {
+  const data = detailState.traceData;
+  if (!data) return `<div class="trace-loading">加载追溯中…</div>`;
+  const events = data.events || [];
+  if (events.length === 0) return `<div class="trace-empty">暂无追溯记录</div>`;
+
+  const summary = data.summary || {};
+  let html = `<div class="trace-toolbar">
+    <div class="trace-summary">
+      <div class="ts-item"><span class="ts-num">${summary.total_events || 0}</span>总事件</div>
+      <div class="ts-item"><span class="ts-num" style="color:#1d7c4c;">${summary.success_count || 0}</span>成功</div>
+      ${(summary.failed_count || 0) > 0 ? `<div class="ts-item"><span class="ts-num" style="color:#d9534f;">${summary.failed_count}</span>失败</div>` : ""}
+      ${(summary.batch_count || 0) > 0 ? `<div class="ts-item"><span class="ts-num" style="color:#8e44ad;">${summary.batch_count}</span>批次关联</div>` : ""}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-ghost" style="padding:5px 12px;font-size:12px;" onclick="exportTraceJson()">⬇ JSON</button>
+      <button class="btn btn-ghost" style="padding:5px 12px;font-size:12px;" onclick="exportTraceCsv()">⬇ CSV</button>
+    </div>
+  </div>`;
+
+  if (!data.can_see_batch_detail) {
+    html += `<div style="padding:8px 12px;background:#fff8e1;border-radius:6px;font-size:12px;color:#856404;margin-bottom:10px;">
+      ⚠ 您是巡查员，已隐藏批量操作的详细字段变更、快照及失败原因。管理员可见完整信息。
+    </div>`;
+  }
+
+  html += `<div class="trace-timeline">`;
+  events.forEach((e, idx) => {
+    html += `<div class="trace-event${_getEventBadgeClass(e)}">
+      <div class="trace-event-head">
+        <div class="trace-event-title">
+          <span class="trace-event-tag ${_getEventTypeTagClass(e.event_type)}">${e.event_label}</span>
+          ${e.is_batch_operation && data.can_see_batch_detail ? `<span class="trace-event-tag t-tag-type-snapshot">批量操作</span>` : ""}
+          ${!e.success ? `<span class="trace-event-tag t-tag-type-cancel">失败</span>` : ""}
+          <span>${e.from_status || "创建"} → ${e.to_status || "已删除"}</span>
+        </div>
+        <div class="trace-event-meta">
+          ${fmtTime(e.created_at)}
+          ${e.operator_name ? ` · ${e.operator_name}` : ""}
+          ${e.operator_role ? `（${e.operator_role === "admin" ? "管理员" : "巡查员"}）` : ""}
+        </div>
+      </div>
+      <div class="trace-event-body">`;
+
+    if (e.changed_fields && e.changed_fields.length > 0) {
+      html += `<div class="changed-fields">变更字段：${e.changed_fields.map(f => `<span>${f}</span>`).join("")}</div>`;
+    }
+    if (e.batch_no && data.can_see_batch_detail) {
+      html += `<div class="batch-info">📦 所属批次：${e.batch_no}（ID: ${e.batch_id}）</div>`;
+    }
+    if (e.note) {
+      html += `<div class="note-text">📝 ${e.note}</div>`;
+    }
+    if (!e.success && e.fail_reason && data.can_see_batch_detail) {
+      html += `<div class="fail-text">❌ ${e.fail_reason}</div>`;
+    }
+    if (e.diffs && e.diffs.length > 0) {
+      html += `<div class="diff-toggle" onclick="toggleDiff(${idx})">▸ 查看字段差异 (${e.diffs.length})</div>
+        <div class="diff-panel" id="diffPanel${idx}" style="display:none;">
+          <table>
+            <thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead>
+            <tbody>
+              ${e.diffs.map(d => `<tr>
+                <td class="field">${d.field}</td>
+                <td class="before">${_formatVal(d.before)}</td>
+                <td class="after">${_formatVal(d.after)}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+    html += `</div></div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function toggleDiff(idx) {
+  const p = $id("diffPanel" + idx);
+  if (!p) return;
+  p.style.display = p.style.display === "none" ? "block" : "none";
+}
+
+function renderDetailBody(o) {
   const hists = (o.histories || []).slice().sort((a,b) => a.id - b.id);
   const team = state.teams.find(t => t.id === o.team_id);
   const v = state.vehicles.find(x => x.id === o.vehicle_id);
+
+  let infoHtml = `<div class="meta" style="grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:14px;">
+    <div><span class="k">工单号：</span><strong>${o.order_no}</strong></div>
+    <div><span class="k">状态：</span><span class="status-tag status-${o.status}">${o.status}</span></div>
+    <div><span class="k">道路：</span>${o.road}</div>
+    <div><span class="k">树木编号：</span>${o.tree_no}</div>
+    <div><span class="k">风险等级：</span><span class="risk risk-${o.risk_level}">${o.risk_level}</span></div>
+    <div><span class="k">需封路：</span>${o.need_road_close ? "是" : "否"}</div>
+    <div><span class="k">上报人：</span>${o.reporter_name || "-"}</div>
+    <div><span class="k">上报时间：</span>${fmtTime(o.reported_at)}</div>
+    <div><span class="k">建议时段：</span>${o.suggested_time || "-"}</div>
+    <div><span class="k">队伍：</span>${o.team_name ? `${o.team_name}（${team?.leader || ""}）` : "-"}</div>
+    <div><span class="k">车辆：</span>${o.vehicle_plate ? `${o.vehicle_plate} · ${v?.type || ""}` : "-"}</div>
+    <div><span class="k">派工时间：</span>${fmtTime(o.assigned_at)}</div>
+    <div style="grid-column:1/-1;"><span class="k">封路窗口：</span>${
+      (o.road_close_start && o.road_close_end)
+        ? `${fmtTime(o.road_close_start)} ~ ${fmtTime(o.road_close_end)}` : "-"}</div>
+    <div style="grid-column:1/-1;"><span class="k">情况描述：</span>${o.description || "-"}</div>
+    ${o.status === "已撤销" ? `<div style="grid-column:1/-1;"><span class="k">撤销原因：</span>${o.cancel_reason || "-"}</div>` : ""}
+    ${o.status === "已完成" ? `<div style="grid-column:1/-1;"><span class="k">复核备注：</span>${o.review_note || "-"} · ${fmtTime(o.reviewed_at)}</div>` : ""}
+  </div>
+  <h4 style="margin:4px 0 8px;font-size:14px;color:#445068;">📜 状态流转历史</h4>
+  <div class="history-list">
+    ${hists.length === 0 ? `<div style="padding:20px;color:#8893a7;text-align:center;">暂无历史</div>` :
+      hists.map(h => `
+        <div class="history-item">
+          <div class="ht">
+            <span class="hflow">${h.from_status || "创建"} → ${h.to_status}</span>
+            <span>${fmtTime(h.created_at)}</span>
+          </div>
+          <div>操作人：${h.operator_name || "-"}${h.note ? ` · ${h.note}` : ""}</div>
+        </div>`).join("")}
+  </div>`;
+
+  let traceHtml = detailState.currentTab === "trace" ? renderTraceTimeline() : "";
+
   $id("detailBody").innerHTML = `
-    <div class="meta" style="grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:14px;">
-      <div><span class="k">工单号：</span><strong>${o.order_no}</strong></div>
-      <div><span class="k">状态：</span><span class="status-tag status-${o.status}">${o.status}</span></div>
-      <div><span class="k">道路：</span>${o.road}</div>
-      <div><span class="k">树木编号：</span>${o.tree_no}</div>
-      <div><span class="k">风险等级：</span><span class="risk risk-${o.risk_level}">${o.risk_level}</span></div>
-      <div><span class="k">需封路：</span>${o.need_road_close ? "是" : "否"}</div>
-      <div><span class="k">上报人：</span>${o.reporter_name || "-"}</div>
-      <div><span class="k">上报时间：</span>${fmtTime(o.reported_at)}</div>
-      <div><span class="k">建议时段：</span>${o.suggested_time || "-"}</div>
-      <div><span class="k">队伍：</span>${o.team_name ? `${o.team_name}（${team?.leader || ""}）` : "-"}</div>
-      <div><span class="k">车辆：</span>${o.vehicle_plate ? `${o.vehicle_plate} · ${v?.type || ""}` : "-"}</div>
-      <div><span class="k">派工时间：</span>${fmtTime(o.assigned_at)}</div>
-      <div style="grid-column:1/-1;"><span class="k">封路窗口：</span>${
-        (o.road_close_start && o.road_close_end)
-          ? `${fmtTime(o.road_close_start)} ~ ${fmtTime(o.road_close_end)}` : "-"}</div>
-      <div style="grid-column:1/-1;"><span class="k">情况描述：</span>${o.description || "-"}</div>
-      ${o.status === "已撤销" ? `<div style="grid-column:1/-1;"><span class="k">撤销原因：</span>${o.cancel_reason || "-"}</div>` : ""}
-      ${o.status === "已完成" ? `<div style="grid-column:1/-1;"><span class="k">复核备注：</span>${o.review_note || "-"} · ${fmtTime(o.reviewed_at)}</div>` : ""}
+    <div class="trace-tabs-bar">
+      <div class="trace-tab ${detailState.currentTab === "info" ? "active" : ""}" onclick="switchDetailTab('info')">📋 工单详情</div>
+      <div class="trace-tab ${detailState.currentTab === "trace" ? "active" : ""}" onclick="switchDetailTab('trace')">🔍 追溯中心</div>
     </div>
-    <h4 style="margin:4px 0 8px;font-size:14px;color:#445068;">📜 状态流转历史</h4>
-    <div class="history-list">
-      ${hists.length === 0 ? `<div style="padding:20px;color:#8893a7;text-align:center;">暂无历史</div>` :
-        hists.map(h => `
-          <div class="history-item">
-            <div class="ht">
-              <span class="hflow">${h.from_status || "创建"} → ${h.to_status}</span>
-              <span>${fmtTime(h.created_at)}</span>
-            </div>
-            <div>操作人：${h.operator_name || "-"}${h.note ? ` · ${h.note}` : ""}</div>
-          </div>`).join("")}
+    <div id="detailTabContent">
+      ${detailState.currentTab === "info" ? infoHtml : traceHtml}
     </div>
   `;
-  // Fix inline status-tag styling (nested)
+
   const tag = $id("detailBody").querySelector(".status-tag");
   if (tag) {
     const m = { "待派工":"#95a5a6","已派工":"#3498db","作业中":"#f39c12",
                 "待复核":"#8e44ad","已完成":"#27ae60","已撤销":"#7f8c8d" };
     tag.style.background = m[o.status] || "#999";
   }
+}
+
+async function switchDetailTab(tab) {
+  detailState.currentTab = tab;
+  const o = state.orders.find(x => x.id === detailState.currentOrderId);
+  if (!o) return;
+  if (tab === "trace" && !detailState.traceData) {
+    renderDetailBody(o);
+    try {
+      detailState.traceData = await api(`/orders/${detailState.currentOrderId}/trace`);
+    } catch (e) {
+      detailState.traceData = { events: [], summary: {}, can_see_batch_detail: false };
+    }
+  }
+  renderDetailBody(o);
+}
+
+function openDetail(id) {
+  const o = state.orders.find(x => x.id === id);
+  if (!o) return;
+  detailState.currentOrderId = id;
+  detailState.currentTab = "info";
+  detailState.traceData = null;
+  renderDetailBody(o);
+
+  const modalEl = $id("detailModal").querySelector(".modal");
+  if (modalEl) modalEl.classList.add("detail-wide");
   openModal("detailModal");
+}
+
+function exportTraceJson() {
+  if (!detailState.currentOrderId) return;
+  downloadWithAuth(`/orders/${detailState.currentOrderId}/trace/export/json`, `trace_${detailState.currentOrderId}.json`);
+}
+function exportTraceCsv() {
+  if (!detailState.currentOrderId) return;
+  downloadWithAuth(`/orders/${detailState.currentOrderId}/trace/export/csv`, `trace_${detailState.currentOrderId}.csv`);
 }
 
 // ---------- export ----------

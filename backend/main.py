@@ -17,6 +17,7 @@ from database import (
     get_db, init_db, Role, OrderStatus, RiskLevel,
     User, Team, Vehicle, WorkOrder, StatusHistory, AuditLog,
     RestoreBatch, RestoreBatchItem, RestoreBatchStatus, RestoreBatchItemAction,
+    OrderTrace, TraceEventType,
 )
 
 
@@ -217,6 +218,93 @@ def _record_history(db: Session, order: WorkOrder, from_status, to_status: Order
     db.add(h)
 
 
+def _diff_snapshots(before: dict, after: dict) -> List[str]:
+    changed = []
+    ignore = {"id", "order_no"}
+    for k in after:
+        if k in ignore:
+            continue
+        if before.get(k) != after.get(k):
+            changed.append(k)
+    for k in before:
+        if k in ignore:
+            continue
+        if k not in after and before.get(k) is not None:
+            changed.append(k)
+    return changed
+
+
+def _record_trace(
+    db: Session,
+    order: WorkOrder,
+    event_type: TraceEventType,
+    operator: User,
+    *,
+    from_status=None,
+    to_status=None,
+    before_snap: Optional[dict] = None,
+    after_snap: Optional[dict] = None,
+    batch_id: Optional[int] = None,
+    batch_no: Optional[str] = None,
+    is_batch: bool = False,
+    success: bool = True,
+    fail_reason: Optional[str] = None,
+    note: Optional[str] = None,
+    changed_fields: Optional[List[str]] = None,
+    idempotency_key: Optional[str] = None,
+):
+    if idempotency_key:
+        trace_uid = f"{order.order_no}-{event_type.value}-{idempotency_key}"
+    else:
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        rand = uuid.uuid4().hex[:8]
+        trace_uid = f"{order.order_no}-{event_type.value}-{ts}-{rand}"
+
+    existing = db.query(OrderTrace).filter(OrderTrace.trace_uid == trace_uid).first()
+    if existing:
+        return existing
+
+    if changed_fields is None and before_snap and after_snap:
+        changed_fields = _diff_snapshots(before_snap, after_snap)
+
+    from_status_val = from_status
+    if hasattr(from_status, "value"):
+        from_status_val = from_status.value
+    elif from_status is not None:
+        from_status_val = str(from_status)
+
+    to_status_val = to_status
+    if hasattr(to_status, "value"):
+        to_status_val = to_status.value
+    elif to_status is not None:
+        to_status_val = str(to_status)
+
+    trace = OrderTrace(
+        trace_uid=trace_uid,
+        order_id=order.id,
+        order_no=order.order_no,
+        event_type=event_type,
+        operator_id=operator.id,
+        operator_name=operator.name,
+        operator_role=operator.role.value if hasattr(operator.role, "value") else str(operator.role),
+        created_at=datetime.utcnow(),
+        from_status=from_status_val,
+        to_status=to_status_val,
+        changed_fields_json=json.dumps(changed_fields, ensure_ascii=False) if changed_fields else None,
+        before_snapshot_json=json.dumps(before_snap, ensure_ascii=False) if before_snap else None,
+        after_snapshot_json=json.dumps(after_snap, ensure_ascii=False) if after_snap else None,
+        batch_id=batch_id,
+        batch_no=batch_no,
+        is_batch_operation=is_batch,
+        success=success,
+        fail_reason=fail_reason,
+        note=note,
+    )
+    db.add(trace)
+    db.flush()
+    return trace
+
+
 # ---------- conflict checks ----------
 
 def _check_team_time_conflict(db: Session, team_id: int,
@@ -391,6 +479,11 @@ def report_order(data: OrderReportIn, user: User = Depends(_current_user),
     db.add(o)
     db.flush()
     _record_history(db, o, None, OrderStatus.PENDING_ASSIGN, user, note="巡查员上报工单")
+    after_snap = _serialize_order_snapshot(o)
+    _record_trace(db, o, TraceEventType.REPORT, user,
+                  from_status=None, to_status=OrderStatus.PENDING_ASSIGN,
+                  before_snap=None, after_snap=after_snap,
+                  note="巡查员上报工单")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -428,6 +521,7 @@ def assign_order(order_id: int, data: OrderAssignIn,
 
     old_status = o.status
     note_suffix = "改派" if is_reassign else "派工"
+    before_snap = _serialize_order_snapshot(o)
     if not is_reassign:
         o.status = OrderStatus.ASSIGNED
         o.assigned_at = datetime.utcnow()
@@ -438,6 +532,13 @@ def assign_order(order_id: int, data: OrderAssignIn,
     o.assignee_id = user.id
     _record_history(db, o, old_status, OrderStatus.ASSIGNED, user,
                     note=f"{note_suffix}：队伍={team.name}，车辆={vehicle.plate if vehicle else '无'}")
+    db.flush()
+    after_snap = _serialize_order_snapshot(o)
+    event_type = TraceEventType.REASSIGN if is_reassign else TraceEventType.ASSIGN
+    _record_trace(db, o, event_type, user,
+                  from_status=old_status, to_status=OrderStatus.ASSIGNED,
+                  before_snap=before_snap, after_snap=after_snap,
+                  note=f"{note_suffix}：队伍={team.name}，车辆={vehicle.plate if vehicle else '无'}")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -451,10 +552,17 @@ def start_order(order_id: int, user: User = Depends(_current_user),
         raise HTTPException(status_code=404, detail="工单不存在")
     _transition_check(o.status, OrderStatus.IN_PROGRESS)
     old_status = o.status
+    before_snap = _serialize_order_snapshot(o)
     o.status = OrderStatus.IN_PROGRESS
     o.started_at = datetime.utcnow()
     o.start_operator_id = user.id
     _record_history(db, o, old_status, OrderStatus.IN_PROGRESS, user, note="开始作业")
+    db.flush()
+    after_snap = _serialize_order_snapshot(o)
+    _record_trace(db, o, TraceEventType.START, user,
+                  from_status=old_status, to_status=OrderStatus.IN_PROGRESS,
+                  before_snap=before_snap, after_snap=after_snap,
+                  note="开始作业")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -468,10 +576,17 @@ def submit_order(order_id: int, user: User = Depends(_current_user),
         raise HTTPException(status_code=404, detail="工单不存在")
     _transition_check(o.status, OrderStatus.PENDING_REVIEW)
     old_status = o.status
+    before_snap = _serialize_order_snapshot(o)
     o.status = OrderStatus.PENDING_REVIEW
     o.submitted_at = datetime.utcnow()
     o.submit_operator_id = user.id
     _record_history(db, o, old_status, OrderStatus.PENDING_REVIEW, user, note="作业完成，提交复核")
+    db.flush()
+    after_snap = _serialize_order_snapshot(o)
+    _record_trace(db, o, TraceEventType.SUBMIT, user,
+                  from_status=old_status, to_status=OrderStatus.PENDING_REVIEW,
+                  before_snap=before_snap, after_snap=after_snap,
+                  note="作业完成，提交复核")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -494,12 +609,19 @@ def complete_order(order_id: int, data: OrderReviewIn = OrderReviewIn(),
         raise HTTPException(status_code=404, detail="工单不存在")
     _transition_check(o.status, OrderStatus.COMPLETED)
     old_status = o.status
+    before_snap = _serialize_order_snapshot(o)
     o.status = OrderStatus.COMPLETED
     o.reviewed_at = datetime.utcnow()
     o.reviewer_id = user.id
     o.review_note = data.review_note
     _record_history(db, o, old_status, OrderStatus.COMPLETED, user,
                     note=f"复核通过，工单完成。备注：{data.review_note or '无'}")
+    db.flush()
+    after_snap = _serialize_order_snapshot(o)
+    _record_trace(db, o, TraceEventType.COMPLETE, user,
+                  from_status=old_status, to_status=OrderStatus.COMPLETED,
+                  before_snap=before_snap, after_snap=after_snap,
+                  note=f"复核通过，工单完成。备注：{data.review_note or '无'}")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -520,12 +642,19 @@ def cancel_order(order_id: int, data: OrderCancelIn,
         )
     _transition_check(o.status, OrderStatus.CANCELLED)
     old_status = o.status
+    before_snap = _serialize_order_snapshot(o)
     o.status = OrderStatus.CANCELLED
     o.cancelled_at = datetime.utcnow()
     o.canceller_id = user.id
     o.cancel_reason = data.reason.strip()
     _record_history(db, o, old_status, OrderStatus.CANCELLED, user,
                     note=f"撤销工单，原因：{data.reason.strip()}")
+    db.flush()
+    after_snap = _serialize_order_snapshot(o)
+    _record_trace(db, o, TraceEventType.CANCEL, user,
+                  from_status=old_status, to_status=OrderStatus.CANCELLED,
+                  before_snap=before_snap, after_snap=after_snap,
+                  note=f"撤销工单，原因：{data.reason.strip()}")
     db.commit()
     db.refresh(o)
     return _to_order_out(o)
@@ -1026,6 +1155,10 @@ def snapshot_import(data: SnapshotImportIn,
             continue
 
         decision = user_decision or auto_decision
+        if decision == "overwrite":
+            decision = "overwrite_or_skip"
+        elif decision == "create":
+            decision = "create_or_skip"
 
         if decision == "reject":
             reject_reasons = "; ".join(c["message"] for c in conflicts if c.get("action") == "reject")
@@ -1238,6 +1371,13 @@ def snapshot_import(data: SnapshotImportIn,
                 batch_item["order_id"] = existing.id
                 batch_item["after_status"] = snap_status.value
                 batch_item["after_snapshot_json"] = json.dumps(after_snap, ensure_ascii=False)
+
+                _record_trace(db, existing, TraceEventType.SNAPSHOT_OVERWRITE, user,
+                              from_status=old_status_val, to_status=snap_status,
+                              before_snap=before_snap, after_snap=after_snap,
+                              is_batch=True,
+                              note=f"快照恢复覆盖：{old_status_val} → {snap_status.value}")
+
                 batch_items_data.append(batch_item)
 
                 imported_count += 1
@@ -1384,6 +1524,13 @@ def snapshot_import(data: SnapshotImportIn,
                                 note=f"快照恢复新建工单")
 
                 after_snap = _serialize_order_snapshot(new_order)
+
+                _record_trace(db, new_order, TraceEventType.SNAPSHOT_CREATE, user,
+                              from_status=None, to_status=snap_status,
+                              before_snap=None, after_snap=after_snap,
+                              is_batch=True,
+                              note=f"快照恢复新建工单，状态={snap_status.value}")
+
                 batch_item["action"] = "create"
                 batch_item["success"] = True
                 batch_item["reason"] = f"新建工单，状态={snap_status.value}"
@@ -1476,6 +1623,62 @@ def snapshot_import(data: SnapshotImportIn,
             after_snapshot_json=bi["after_snapshot_json"],
         )
         db.add(item)
+
+    db.flush()
+
+    db.query(OrderTrace).filter(
+        OrderTrace.order_no.in_([bi["order_no"] for bi in batch_items_data]),
+        OrderTrace.is_batch_operation == True,
+        OrderTrace.batch_id.is_(None),
+        OrderTrace.event_type.in_([TraceEventType.SNAPSHOT_CREATE, TraceEventType.SNAPSHOT_OVERWRITE]),
+    ).update(
+        {OrderTrace.batch_id: batch.id, OrderTrace.batch_no: batch_no},
+        synchronize_session=False,
+    )
+
+    for bi in batch_items_data:
+        action = bi["action"]
+        if action in ("create", "overwrite"):
+            continue
+        order_id = bi.get("order_id")
+        order_no = bi["order_no"]
+        if not order_id:
+            existing = db.query(WorkOrder).filter(WorkOrder.order_no == order_no).first()
+            if existing:
+                order_id = existing.id
+            else:
+                continue
+        order_obj = db.query(WorkOrder).filter(WorkOrder.id == order_id).first()
+        if not order_obj:
+            continue
+        try:
+            before_snap = json.loads(bi["before_snapshot_json"]) if bi.get("before_snapshot_json") else None
+        except Exception:
+            before_snap = None
+        try:
+            after_snap = json.loads(bi["after_snapshot_json"]) if bi.get("after_snapshot_json") else None
+        except Exception:
+            after_snap = None
+
+        if action == "skip":
+            event_type = TraceEventType.SNAPSHOT_SKIP
+        elif action == "reject":
+            event_type = TraceEventType.SNAPSHOT_REJECT
+        else:
+            event_type = TraceEventType.SNAPSHOT_SKIP
+
+        _record_trace(db, order_obj, event_type, user,
+                      from_status=bi.get("before_status"),
+                      to_status=bi.get("after_status"),
+                      before_snap=before_snap,
+                      after_snap=after_snap,
+                      batch_id=batch.id,
+                      batch_no=batch_no,
+                      is_batch=True,
+                      success=bi.get("success", True),
+                      fail_reason=None if bi.get("success", True) else bi.get("reason"),
+                      note=bi.get("reason"),
+                      idempotency_key=f"batch-{batch.id}-{action}")
 
     log = AuditLog(
         action="snapshot_import",
@@ -1766,6 +1969,23 @@ def revoke_restore_batch(
                 ))
                 continue
 
+            try:
+                before_snap_del = json.loads(item.after_snapshot_json) if item.after_snapshot_json else _serialize_order_snapshot(order)
+            except Exception:
+                before_snap_del = _serialize_order_snapshot(order)
+
+            _record_trace(db, order, TraceEventType.BATCH_REVOKE_DELETE, user,
+                          from_status=item.after_status,
+                          to_status=None,
+                          before_snap=before_snap_del,
+                          after_snap=None,
+                          batch_id=batch.id,
+                          batch_no=batch.batch_no,
+                          is_batch=True,
+                          success=True,
+                          note="删除新建的工单，成功撤销",
+                          idempotency_key=f"revoke-{batch.id}-{item.id}")
+
             db.delete(order)
             item.is_revoked = True
             item.revoked_at = datetime.utcnow()
@@ -1801,6 +2021,25 @@ def revoke_restore_batch(
                 item.revoke_result_reason = None
                 item.revoke_failed_reason = mod_reason
                 item.revoke_changed_fields = json.dumps(changed_fields_list, ensure_ascii=False) if changed_fields_list else None
+
+                try:
+                    before_snap_skip = json.loads(item.after_snapshot_json) if item.after_snapshot_json else _serialize_order_snapshot(order)
+                except Exception:
+                    before_snap_skip = _serialize_order_snapshot(order)
+                _record_trace(db, order, TraceEventType.BATCH_REVOKE_SKIP, user,
+                              from_status=item.after_status,
+                              to_status=item.after_status,
+                              before_snap=before_snap_skip,
+                              after_snap=before_snap_skip,
+                              batch_id=batch.id,
+                              batch_no=batch.batch_no,
+                              is_batch=True,
+                              success=False,
+                              fail_reason=mod_reason,
+                              changed_fields=changed_fields_list,
+                              note=mod_reason,
+                              idempotency_key=f"revoke-{batch.id}-{item.id}")
+
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_skip", success=False,
                     reason=mod_reason,
@@ -1816,6 +2055,24 @@ def revoke_restore_batch(
                 item.revoke_result_reason = None
                 item.revoke_failed_reason = "无法解析恢复前快照，无法回退"
                 item.revoke_changed_fields = None
+
+                try:
+                    before_snap_fail = json.loads(item.after_snapshot_json) if item.after_snapshot_json else _serialize_order_snapshot(order)
+                except Exception:
+                    before_snap_fail = _serialize_order_snapshot(order)
+                _record_trace(db, order, TraceEventType.BATCH_REVOKE_SKIP, user,
+                              from_status=item.after_status,
+                              to_status=item.after_status,
+                              before_snap=before_snap_fail,
+                              after_snap=before_snap_fail,
+                              batch_id=batch.id,
+                              batch_no=batch.batch_no,
+                              is_batch=True,
+                              success=False,
+                              fail_reason="无法解析恢复前快照，无法回退",
+                              note="无法解析恢复前快照，无法回退",
+                              idempotency_key=f"revoke-{batch.id}-{item.id}")
+
                 revoke_results.append(RevokeBatchItemOut(
                     order_no=order_no, action="revoke_skip", success=False,
                     reason="无法解析恢复前快照，无法回退",
@@ -1931,6 +2188,24 @@ def revoke_restore_batch(
             _record_history(db, order, item.after_status, order.status, user,
                             note=f"批次撤销回退：从「{item.after_status}」回退为「{order.status.value}」")
 
+            try:
+                after_snap_restore = json.loads(item.after_snapshot_json) if item.after_snapshot_json else None
+            except Exception:
+                after_snap_restore = None
+
+            _record_trace(db, order, TraceEventType.BATCH_REVOKE_RESTORE, user,
+                          from_status=item.after_status,
+                          to_status=order.status,
+                          before_snap=after_snap_restore,
+                          after_snap=before_snap,
+                          batch_id=batch.id,
+                          batch_no=batch.batch_no,
+                          is_batch=True,
+                          success=True,
+                          changed_fields=restore_changed_fields,
+                          note=f"回退到恢复前状态：{item.after_status} → {order.status.value}",
+                          idempotency_key=f"revoke-{batch.id}-{item.id}")
+
             success_reason = f"回退到恢复前状态：{item.after_status} → {order.status.value}"
             if restore_changed_fields:
                 field_display = ", ".join(restore_changed_fields[:5])
@@ -1998,3 +2273,316 @@ def revoke_restore_batch(
         status=batch.status.value if hasattr(batch.status, "value") else str(batch.status),
         items=revoke_results,
     )
+
+
+# ---------- Order Trace (追溯中心) ----------
+
+EVENT_LABEL_MAP = {
+    "report": "巡查员上报",
+    "assign": "管理员派工",
+    "reassign": "管理员改派",
+    "cancel": "撤销工单",
+    "start": "开始作业",
+    "submit": "提交复核",
+    "complete": "复核完成",
+    "snapshot_create": "快照恢复-新建",
+    "snapshot_overwrite": "快照恢复-覆盖",
+    "snapshot_skip": "快照恢复-跳过",
+    "snapshot_reject": "快照恢复-拒绝",
+    "batch_revoke_delete": "批次撤销-删除",
+    "batch_revoke_restore": "批次撤销-回退",
+    "batch_revoke_skip": "批次撤销-跳过",
+}
+
+
+class OrderTraceItemOut(BaseModel):
+    id: int
+    trace_uid: str
+    order_id: int
+    order_no: str
+    event_type: str
+    event_label: str
+    operator_id: int
+    operator_name: Optional[str]
+    operator_role: Optional[str]
+    created_at: datetime
+    from_status: Optional[str]
+    to_status: Optional[str]
+    changed_fields: Optional[List[str]]
+    before_snapshot: Optional[dict]
+    after_snapshot: Optional[dict]
+    diffs: Optional[List[dict]]
+    batch_id: Optional[int]
+    batch_no: Optional[str]
+    is_batch_operation: bool
+    success: bool
+    fail_reason: Optional[str]
+    note: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class OrderTraceOut(BaseModel):
+    order_id: int
+    order_no: str
+    can_see_batch_detail: bool
+    current_status: str
+    reporter_id: Optional[int]
+    reporter_name: Optional[str]
+    events: List[OrderTraceItemOut]
+    summary: dict
+
+
+def _build_field_diffs(before: Optional[dict], after: Optional[dict]) -> List[dict]:
+    if not before or not after:
+        return []
+    diffs = []
+    ignore = {"id", "order_no"}
+    all_keys = set(before.keys()) | set(after.keys())
+    for k in sorted(all_keys):
+        if k in ignore:
+            continue
+        bv = before.get(k)
+        av = after.get(k)
+        if bv != av:
+            diffs.append({"field": k, "before": bv, "after": av})
+    return diffs
+
+
+@app.get("/api/orders/{order_id}/trace", response_model=OrderTraceOut)
+def get_order_trace(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    order = db.query(WorkOrder).filter(WorkOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    is_admin = user.role == Role.ADMIN
+    is_reporter = order.reporter_id == user.id
+
+    if not is_admin and not is_reporter:
+        raise HTTPException(status_code=403, detail="权限不足：只能查看自己提交的工单追溯")
+
+    can_see_batch_detail = is_admin
+
+    traces = db.query(OrderTrace).filter(OrderTrace.order_id == order_id).order_by(
+        OrderTrace.created_at.asc(), OrderTrace.id.asc()
+    ).all()
+
+    events = []
+    batch_ids_in_trace = set()
+    for t in traces:
+        try:
+            changed_fields = json.loads(t.changed_fields_json) if t.changed_fields_json else None
+        except Exception:
+            changed_fields = None
+        try:
+            before_snap = json.loads(t.before_snapshot_json) if t.before_snapshot_json else None
+        except Exception:
+            before_snap = None
+        try:
+            after_snap = json.loads(t.after_snapshot_json) if t.after_snapshot_json else None
+        except Exception:
+            after_snap = None
+
+        event_type_val = t.event_type.value if hasattr(t.event_type, "value") else str(t.event_type)
+        diffs = _build_field_diffs(before_snap, after_snap)
+
+        out_before = before_snap if can_see_batch_detail or not t.is_batch_operation else None
+        out_after = after_snap if can_see_batch_detail or not t.is_batch_operation else None
+        out_diffs = diffs if can_see_batch_detail or not t.is_batch_operation else None
+        out_batch_id = t.batch_id if can_see_batch_detail else None
+        out_batch_no = t.batch_no if can_see_batch_detail else None
+        out_fail = t.fail_reason if can_see_batch_detail or not t.is_batch_operation else None
+
+        events.append(OrderTraceItemOut(
+            id=t.id,
+            trace_uid=t.trace_uid,
+            order_id=t.order_id,
+            order_no=t.order_no,
+            event_type=event_type_val,
+            event_label=EVENT_LABEL_MAP.get(event_type_val, event_type_val),
+            operator_id=t.operator_id,
+            operator_name=t.operator_name,
+            operator_role=t.operator_role,
+            created_at=t.created_at,
+            from_status=t.from_status,
+            to_status=t.to_status,
+            changed_fields=changed_fields if (can_see_batch_detail or not t.is_batch_operation) else None,
+            before_snapshot=out_before,
+            after_snapshot=out_after,
+            diffs=out_diffs,
+            batch_id=out_batch_id,
+            batch_no=out_batch_no,
+            is_batch_operation=t.is_batch_operation,
+            success=t.success,
+            fail_reason=out_fail,
+            note=t.note,
+        ))
+        if t.batch_id:
+            batch_ids_in_trace.add(t.batch_id)
+
+    event_counts = {}
+    for e in events:
+        event_counts[e.event_type] = event_counts.get(e.event_type, 0) + 1
+
+    summary = {
+        "total_events": len(events),
+        "event_counts": event_counts,
+        "batch_count": len(batch_ids_in_trace),
+        "success_count": sum(1 for e in events if e.success),
+        "failed_count": sum(1 for e in events if not e.success),
+    }
+
+    return OrderTraceOut(
+        order_id=order.id,
+        order_no=order.order_no,
+        can_see_batch_detail=can_see_batch_detail,
+        current_status=order.status.value if hasattr(order.status, "value") else str(order.status),
+        reporter_id=order.reporter_id,
+        reporter_name=order.reporter.name if order.reporter else None,
+        events=events,
+        summary=summary,
+    )
+
+
+def _serialize_trace_for_export(order_id: int, db: Session, user: User) -> dict:
+    order = db.query(WorkOrder).filter(WorkOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    is_admin = user.role == Role.ADMIN
+    is_reporter = order.reporter_id == user.id
+    if not is_admin and not is_reporter:
+        raise HTTPException(status_code=403, detail="权限不足：只能导出自己提交的工单追溯")
+
+    can_see_batch_detail = is_admin
+
+    traces = db.query(OrderTrace).filter(OrderTrace.order_id == order_id).order_by(
+        OrderTrace.created_at.asc(), OrderTrace.id.asc()
+    ).all()
+
+    rows = []
+    for t in traces:
+        try:
+            changed_fields = json.loads(t.changed_fields_json) if t.changed_fields_json else []
+        except Exception:
+            changed_fields = []
+        try:
+            before_snap = json.loads(t.before_snapshot_json) if t.before_snapshot_json else None
+        except Exception:
+            before_snap = None
+        try:
+            after_snap = json.loads(t.after_snapshot_json) if t.after_snapshot_json else None
+        except Exception:
+            after_snap = None
+
+        event_type_val = t.event_type.value if hasattr(t.event_type, "value") else str(t.event_type)
+        diffs = _build_field_diffs(before_snap, after_snap)
+
+        expose_batch = can_see_batch_detail or not t.is_batch_operation
+        rows.append({
+            "trace_id": t.id,
+            "trace_uid": t.trace_uid,
+            "event_time": t.created_at.isoformat() if t.created_at else "",
+            "event_type": event_type_val,
+            "event_label": EVENT_LABEL_MAP.get(event_type_val, event_type_val),
+            "operator_id": t.operator_id,
+            "operator_name": t.operator_name or "",
+            "operator_role": t.operator_role or "",
+            "from_status": t.from_status or "",
+            "to_status": t.to_status or "",
+            "changed_fields": ", ".join(changed_fields) if (expose_batch and changed_fields) else "",
+            "is_batch_operation": "是" if t.is_batch_operation else "否",
+            "batch_id": t.batch_id if expose_batch else "",
+            "batch_no": t.batch_no if expose_batch else "",
+            "success": "成功" if t.success else "失败",
+            "fail_reason": t.fail_reason if expose_batch else "",
+            "note": t.note or "",
+            "diffs_json": json.dumps(diffs, ensure_ascii=False) if (expose_batch and diffs) else "",
+            "before_snapshot_json": json.dumps(before_snap, ensure_ascii=False) if (expose_batch and before_snap) else "",
+            "after_snapshot_json": json.dumps(after_snap, ensure_ascii=False) if (expose_batch and after_snap) else "",
+        })
+
+    return {
+        "order": {
+            "id": order.id,
+            "order_no": order.order_no,
+            "road": order.road,
+            "tree_no": order.tree_no,
+            "risk_level": order.risk_level.value if hasattr(order.risk_level, "value") else str(order.risk_level),
+            "current_status": order.status.value if hasattr(order.status, "value") else str(order.status),
+            "reporter_id": order.reporter_id,
+            "reporter_name": order.reporter.name if order.reporter else "",
+            "reported_at": order.reported_at.isoformat() if order.reported_at else "",
+        },
+        "exported_at": datetime.utcnow().isoformat(),
+        "exported_by": {"id": user.id, "name": user.name, "role": user.role.value},
+        "can_see_batch_detail": can_see_batch_detail,
+        "total_events": len(rows),
+        "events": rows,
+    }
+
+
+@app.get("/api/orders/{order_id}/trace/export/json")
+def export_order_trace_json(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    payload = _serialize_trace_for_export(order_id, db, user)
+    content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    resp = StreamingResponse(
+        iter([content]),
+        media_type="application/json; charset=utf-8",
+    )
+    fname = f"order_trace_{payload['order']['order_no']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@app.get("/api/orders/{order_id}/trace/export/csv")
+def export_order_trace_csv(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    payload = _serialize_trace_for_export(order_id, db, user)
+    rows = payload["events"]
+    if not rows:
+        headers = []
+    else:
+        headers = list(rows[0].keys())
+
+    buf = io.StringIO(newline="")
+    writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+
+    header_lines = []
+    for k, v in payload["order"].items():
+        header_lines.append([f"order_{k}", str(v) if v is not None else ""])
+    header_lines.append(["exported_at", payload["exported_at"]])
+    header_lines.append(["exported_by_name", payload["exported_by"]["name"]])
+    header_lines.append(["exported_by_role", payload["exported_by"]["role"]])
+    header_lines.append(["total_events", str(payload["total_events"])])
+    header_lines.append(["can_see_batch_detail", "是" if payload["can_see_batch_detail"] else "否"])
+    header_lines.append([])
+
+    header_buf = io.StringIO(newline="")
+    hw = csv.writer(header_buf)
+    for hl in header_lines:
+        hw.writerow(hl)
+
+    content = (header_buf.getvalue() + buf.getvalue()).encode("utf-8-sig")
+    resp = StreamingResponse(
+        iter([content]),
+        media_type="text/csv; charset=utf-8",
+    )
+    fname = f"order_trace_{payload['order']['order_no']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp

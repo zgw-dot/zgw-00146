@@ -1,0 +1,1 @@
+requests.exceptions.ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=8004): Max retries exceeded with url: /api/orders/report (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DD028338C0>: Failed to establish a new connection: [WinError 10061] 鐢变簬鐩爣璁＄畻鏈虹Н鏋佹嫆缁濓紝鏃犳硶杩炴帴銆?))
