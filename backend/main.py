@@ -18,6 +18,7 @@ from database import (
     User, Team, Vehicle, WorkOrder, StatusHistory, AuditLog,
     RestoreBatch, RestoreBatchItem, RestoreBatchStatus, RestoreBatchItemAction,
     OrderTrace, TraceEventType,
+    VerificationTask, VerificationStatus, SystemConfig,
 )
 
 
@@ -2586,3 +2587,995 @@ def export_order_trace_csv(
     fname = f"order_trace_{payload['order']['order_no']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
     return resp
+
+
+# ========== Verification Console (校验台) ==========
+
+def _get_config_value(db: Session, key: str, default=None):
+    cfg = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
+    if not cfg:
+        return default
+    val = cfg.config_value
+    ctype = cfg.config_type
+    if ctype == "int":
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+    if ctype == "bool":
+        return str(val).lower() in ("true", "1", "yes", "on")
+    if ctype == "float":
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+    return val
+
+
+def _set_config_value(db: Session, key: str, value, ctype: str = "string",
+                      description: str = "", updated_by: str = ""):
+    cfg = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
+    if cfg:
+        cfg.config_value = str(value)
+        cfg.config_type = ctype
+        if description:
+            cfg.description = description
+        cfg.updated_by = updated_by or cfg.updated_by
+    else:
+        db.add(SystemConfig(
+            config_key=key,
+            config_value=str(value),
+            config_type=ctype,
+            description=description,
+            updated_by=updated_by,
+        ))
+
+
+def _generate_task_no() -> str:
+    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+    rand = uuid.uuid4().hex[:6].upper()
+    return f"VFY-{ts}-{rand}"
+
+
+def _detect_conflicts_in_events(events: List[dict]) -> List[dict]:
+    conflicts = []
+    seen_statuses = []
+    batch_ops = []
+
+    for i, e in enumerate(events):
+        et = e.get("event_type", "")
+        success = e.get("success", True)
+        is_batch = e.get("is_batch_operation", False)
+
+        if is_batch:
+            batch_ops.append(e)
+
+        if not success and et not in ("snapshot_skip", "batch_revoke_skip"):
+            conflicts.append({
+                "index": i,
+                "type": "failed_event",
+                "severity": "high",
+                "event_type": et,
+                "event_label": e.get("event_label", et),
+                "message": f"操作失败：{e.get('fail_reason', '未知原因')}",
+                "created_at": e.get("created_at"),
+            })
+
+        if is_batch and et == "batch_revoke_skip":
+            conflicts.append({
+                "index": i,
+                "type": "revoke_skip",
+                "severity": "medium",
+                "event_type": et,
+                "event_label": e.get("event_label", et),
+                "message": f"批次撤销被跳过：{e.get('fail_reason', e.get('note', ''))}",
+                "created_at": e.get("created_at"),
+            })
+
+        if is_batch and et in ("snapshot_overwrite", "snapshot_create"):
+            prev_non_batch = None
+            for j in range(i - 1, -1, -1):
+                if not events[j].get("is_batch_operation"):
+                    prev_non_batch = events[j]
+                    break
+            if prev_non_batch and prev_non_batch.get("success"):
+                conflicts.append({
+                    "index": i,
+                    "type": "snapshot_override",
+                    "severity": "info",
+                    "event_type": et,
+                    "event_label": e.get("event_label", et),
+                    "message": f"快照覆盖/新建了人工操作记录（操作人：{prev_non_batch.get('operator_name', '未知')}）",
+                    "created_at": e.get("created_at"),
+                })
+
+    if len(batch_ops) >= 4:
+        conflicts.append({
+            "type": "multiple_batch_ops",
+            "severity": "warning",
+            "message": f"该工单涉及 {len(batch_ops)} 次批量操作，建议核查数据一致性",
+            "batch_count": len(batch_ops),
+        })
+
+    status_flow = [e.get("to_status") for e in events if e.get("to_status") and e.get("success")]
+    for i in range(1, len(status_flow)):
+        if status_flow[i] and status_flow[i - 1]:
+            if status_flow[i - 1] in ("已完成", "已撤销") and status_flow[i] not in ("已完成", "已撤销"):
+                conflicts.append({
+                    "type": "status_regression",
+                    "severity": "high",
+                    "message": f"状态倒退：从「{status_flow[i - 1]}」回到「{status_flow[i]}」",
+                })
+
+    return conflicts
+
+
+def _build_verification_result(order: WorkOrder, traces: List[OrderTrace],
+                                can_see_batch_detail: bool) -> dict:
+    events = []
+    for t in traces:
+        try:
+            changed_fields = json.loads(t.changed_fields_json) if t.changed_fields_json else None
+        except Exception:
+            changed_fields = None
+        try:
+            before_snap = json.loads(t.before_snapshot_json) if t.before_snapshot_json else None
+        except Exception:
+            before_snap = None
+        try:
+            after_snap = json.loads(t.after_snapshot_json) if t.after_snapshot_json else None
+        except Exception:
+            after_snap = None
+
+        event_type_val = t.event_type.value if hasattr(t.event_type, "value") else str(t.event_type)
+        diffs = _build_field_diffs(before_snap, after_snap)
+
+        expose_batch = can_see_batch_detail or not t.is_batch_operation
+
+        events.append({
+            "id": t.id,
+            "trace_uid": t.trace_uid,
+            "event_type": event_type_val,
+            "event_label": EVENT_LABEL_MAP.get(event_type_val, event_type_val),
+            "operator_id": t.operator_id,
+            "operator_name": t.operator_name,
+            "operator_role": t.operator_role,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "from_status": t.from_status,
+            "to_status": t.to_status,
+            "changed_fields": changed_fields if expose_batch else None,
+            "before_snapshot": before_snap if expose_batch else None,
+            "after_snapshot": after_snap if expose_batch else None,
+            "diffs": diffs if expose_batch else None,
+            "batch_id": t.batch_id if can_see_batch_detail else None,
+            "batch_no": t.batch_no if can_see_batch_detail else None,
+            "is_batch_operation": t.is_batch_operation,
+            "success": t.success,
+            "fail_reason": t.fail_reason if expose_batch else None,
+            "note": t.note,
+        })
+
+    conflicts = _detect_conflicts_in_events(events)
+
+    event_counts = {}
+    for e in events:
+        et = e["event_type"]
+        event_counts[et] = event_counts.get(et, 0) + 1
+
+    batch_ids = {e["batch_id"] for e in events if e["batch_id"]}
+
+    summary = {
+        "total_events": len(events),
+        "event_counts": event_counts,
+        "batch_count": len(batch_ids),
+        "success_count": sum(1 for e in events if e["success"]),
+        "failed_count": sum(1 for e in events if not e["success"]),
+        "conflict_count": len(conflicts),
+        "high_conflict_count": sum(1 for c in conflicts if c.get("severity") == "high"),
+        "medium_conflict_count": sum(1 for c in conflicts if c.get("severity") == "medium"),
+    }
+
+    order_info = {
+        "id": order.id,
+        "order_no": order.order_no,
+        "road": order.road,
+        "tree_no": order.tree_no,
+        "risk_level": order.risk_level.value if hasattr(order.risk_level, "value") else str(order.risk_level),
+        "current_status": order.status.value if hasattr(order.status, "value") else str(order.status),
+        "reporter_id": order.reporter_id,
+        "reporter_name": order.reporter.name if order.reporter else None,
+        "reported_at": order.reported_at.isoformat() if order.reported_at else None,
+    }
+
+    return {
+        "order": order_info,
+        "events": events,
+        "conflicts": conflicts,
+        "summary": summary,
+        "can_see_batch_detail": can_see_batch_detail,
+        "verification_time": datetime.utcnow().isoformat(),
+    }
+
+
+def _run_verification_for_order(db: Session, order: WorkOrder, user: User) -> dict:
+    is_admin = user.role == Role.ADMIN
+    is_reporter = order.reporter_id == user.id
+
+    if not is_admin and not is_reporter:
+        raise HTTPException(status_code=403, detail="权限不足：只能校验自己提交的工单")
+
+    can_see_batch_detail = is_admin
+
+    traces = db.query(OrderTrace).filter(OrderTrace.order_id == order.id).order_by(
+        OrderTrace.created_at.asc(), OrderTrace.id.asc()
+    ).all()
+
+    return _build_verification_result(order, traces, can_see_batch_detail)
+
+
+def _run_verification_for_batch(db: Session, batch_id: int, user: User) -> dict:
+    if user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="权限不足：只有管理员可按批次校验")
+
+    batch = db.query(RestoreBatch).filter(RestoreBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    items = db.query(RestoreBatchItem).filter(RestoreBatchItem.batch_id == batch_id).all()
+    order_nos = [item.order_no for item in items]
+
+    traces = db.query(OrderTrace).filter(OrderTrace.batch_id == batch_id).order_by(
+        OrderTrace.order_no.asc(), OrderTrace.created_at.asc(), OrderTrace.id.asc()
+    ).all()
+
+    order_traces_map = {}
+    for t in traces:
+        if t.order_no not in order_traces_map:
+            order_traces_map[t.order_no] = []
+        order_traces_map[t.order_no].append(t)
+
+    orders = db.query(WorkOrder).filter(WorkOrder.order_no.in_(order_nos)).all()
+    order_map = {o.order_no: o for o in orders}
+
+    per_order_results = []
+    all_events = []
+    all_conflicts = []
+    total_event_count = 0
+    total_conflict_count = 0
+
+    for item in items:
+        o = order_map.get(item.order_no)
+        item_traces = order_traces_map.get(item.order_no, [])
+
+        if o:
+            order_result = _build_verification_result(o, item_traces, True)
+            per_order_results.append(order_result)
+            all_events.extend(order_result["events"])
+            all_conflicts.extend([
+                {**c, "order_no": o.order_no}
+                for c in order_result["conflicts"]
+            ])
+            total_event_count += order_result["summary"]["total_events"]
+            total_conflict_count += order_result["summary"]["conflict_count"]
+        else:
+            per_order_results.append({
+                "order": {
+                    "order_no": item.order_no,
+                    "current_status": "已删除/不存在",
+                },
+                "events": [],
+                "conflicts": [{"type": "order_missing", "severity": "high",
+                               "message": "该工单在系统中已不存在"}],
+                "summary": {"total_events": 0, "conflict_count": 1},
+                "can_see_batch_detail": True,
+            })
+            all_conflicts.append({
+                "type": "order_missing",
+                "severity": "high",
+                "message": f"工单 {item.order_no} 在系统中已不存在",
+                "order_no": item.order_no,
+            })
+            total_conflict_count += 1
+
+    summary = {
+        "total_orders": len(per_order_results),
+        "total_events": total_event_count,
+        "total_conflicts": total_conflict_count,
+        "batch_id": batch.id,
+        "batch_no": batch.batch_no,
+        "batch_status": batch.status.value if hasattr(batch.status, "value") else str(batch.status),
+    }
+
+    return {
+        "batch": {
+            "id": batch.id,
+            "batch_no": batch.batch_no,
+            "status": batch.status.value if hasattr(batch.status, "value") else str(batch.status),
+            "operator_name": batch.operator_name,
+            "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "total_count": batch.total_count,
+            "imported_count": batch.imported_count,
+            "skipped_count": batch.skipped_count,
+            "rejected_count": batch.rejected_count,
+            "failed_count": batch.failed_count,
+            "revoked_count": batch.revoked_count,
+        },
+        "orders": per_order_results,
+        "all_events": all_events,
+        "all_conflicts": all_conflicts,
+        "summary": summary,
+        "verification_time": datetime.utcnow().isoformat(),
+    }
+
+
+def _cleanup_expired_verifications(db: Session) -> int:
+    if not _get_config_value(db, "verification_auto_clean_enabled", True):
+        return 0
+
+    retention_days = _get_config_value(db, "verification_retention_days", 30)
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    expired = db.query(VerificationTask).filter(VerificationTask.created_at < cutoff).all()
+    count = len(expired)
+    for t in expired:
+        db.delete(t)
+    db.commit()
+    return count
+
+
+def _build_audit_package(task: VerificationTask, result: dict, user: User) -> dict:
+    return {
+        "audit_package_version": "1.0.0",
+        "generated_at": datetime.utcnow().isoformat(),
+        "generated_by": {"id": user.id, "name": user.name, "role": user.role.value},
+        "task": {
+            "id": task.id,
+            "task_no": task.task_no,
+            "task_type": task.task_type,
+            "target_order_no": task.target_order_no,
+            "target_order_id": task.target_order_id,
+            "target_batch_id": task.target_batch_id,
+            "target_batch_no": task.target_batch_no,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "rerun_count": task.rerun_count,
+            "export_count": task.export_count,
+        },
+        "verification_result": result,
+        "summary": result.get("summary", {}),
+    }
+
+
+# ---- Pydantic schemas for verification ----
+
+class VerificationTaskOut(BaseModel):
+    id: int
+    task_no: str
+    task_type: str
+    target_order_no: Optional[str]
+    target_order_id: Optional[int]
+    target_batch_id: Optional[int]
+    target_batch_no: Optional[str]
+    status: str
+    operator_id: int
+    operator_name: Optional[str]
+    result_summary: Optional[str]
+    conflict_count: int
+    event_count: int
+    failed_event_count: int
+    batch_count: int
+    error_message: Optional[str]
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    rerun_count: int
+    last_rerun_at: Optional[datetime]
+    export_count: int
+    last_export_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class VerificationTaskDetailOut(VerificationTaskOut):
+    result: Optional[dict] = None
+
+
+class CreateVerificationIn(BaseModel):
+    task_type: str = Field(default="order_trace", description="校验类型: order_trace / batch_trace")
+    order_id: Optional[int] = Field(default=None, description="工单ID")
+    order_no: Optional[str] = Field(default=None, description="工单号")
+    batch_id: Optional[int] = Field(default=None, description="批次ID")
+    batch_no: Optional[str] = Field(default=None, description="批次号")
+
+
+class RerunVerificationIn(BaseModel):
+    reason: Optional[str] = Field(default="手动重跑", description="重跑原因")
+
+
+class SystemConfigOut(BaseModel):
+    id: int
+    config_key: str
+    config_value: str
+    config_type: str
+    description: Optional[str]
+    updated_at: Optional[datetime]
+    updated_by: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class UpdateSystemConfigIn(BaseModel):
+    config_value: str
+
+
+# ---- Verification APIs ----
+
+@app.post("/api/verification/tasks", response_model=VerificationTaskDetailOut)
+def create_verification_task(
+    data: CreateVerificationIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    target_order = None
+    target_batch = None
+
+    if data.task_type == "order_trace":
+        if data.order_id:
+            target_order = db.query(WorkOrder).filter(WorkOrder.id == data.order_id).first()
+        elif data.order_no:
+            target_order = db.query(WorkOrder).filter(WorkOrder.order_no == data.order_no).first()
+
+        if not target_order:
+            raise HTTPException(status_code=404, detail="工单不存在")
+
+        if user.role != Role.ADMIN and target_order.reporter_id != user.id:
+            raise HTTPException(status_code=403, detail="权限不足：只能校验自己提交的工单")
+
+    elif data.task_type == "batch_trace":
+        if user.role != Role.ADMIN:
+            raise HTTPException(status_code=403, detail="权限不足：只有管理员可按批次校验")
+
+        if data.batch_id:
+            target_batch = db.query(RestoreBatch).filter(RestoreBatch.id == data.batch_id).first()
+        elif data.batch_no:
+            target_batch = db.query(RestoreBatch).filter(RestoreBatch.batch_no == data.batch_no).first()
+
+        if not target_batch:
+            raise HTTPException(status_code=404, detail="批次不存在")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的校验类型: {data.task_type}")
+
+    task = VerificationTask(
+        task_no=_generate_task_no(),
+        task_type=data.task_type,
+        target_order_no=target_order.order_no if target_order else None,
+        target_order_id=target_order.id if target_order else None,
+        target_batch_id=target_batch.id if target_batch else None,
+        target_batch_no=target_batch.batch_no if target_batch else None,
+        status=VerificationStatus.RUNNING,
+        operator_id=user.id,
+        operator_name=user.name,
+    )
+    db.add(task)
+    db.flush()
+
+    try:
+        if data.task_type == "order_trace" and target_order:
+            result = _run_verification_for_order(db, target_order, user)
+        elif data.task_type == "batch_trace" and target_batch:
+            result = _run_verification_for_batch(db, target_batch, user)
+        else:
+            result = {}
+
+        summary = result.get("summary", {})
+        task.result_summary = (
+            f"事件数:{summary.get('total_events', 0)}, "
+            f"冲突数:{summary.get('conflict_count', 0)}, "
+            f"批次数:{summary.get('batch_count', 0)}"
+        )
+        task.result_json = json.dumps(result, ensure_ascii=False)
+        task.conflict_count = summary.get("conflict_count", 0)
+        task.event_count = summary.get("total_events", 0)
+        task.failed_event_count = summary.get("failed_count", 0)
+        task.batch_count = summary.get("batch_count", 0)
+        task.status = VerificationStatus.COMPLETED
+        task.completed_at = datetime.utcnow()
+
+        log = AuditLog(
+            action="verification_create",
+            operator_id=user.id,
+            operator_name=user.name,
+            target_type="verification_task",
+            target_id=task.task_no,
+            detail=f"创建校验任务 {task.task_no}，类型={data.task_type}，"
+                   f"目标={target_order.order_no if target_order else target_batch.batch_no if target_batch else '未知'}",
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(task)
+
+    except Exception as e:
+        task.status = VerificationStatus.FAILED
+        task.error_message = str(e)
+        task.completed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(task)
+
+    result_dict = None
+    if task.result_json:
+        try:
+            result_dict = json.loads(task.result_json)
+        except Exception:
+            result_dict = None
+
+    return VerificationTaskDetailOut(
+        id=task.id,
+        task_no=task.task_no,
+        task_type=task.task_type,
+        target_order_no=task.target_order_no,
+        target_order_id=task.target_order_id,
+        target_batch_id=task.target_batch_id,
+        target_batch_no=task.target_batch_no,
+        status=task.status.value if hasattr(task.status, "value") else str(task.status),
+        operator_id=task.operator_id,
+        operator_name=task.operator_name,
+        result_summary=task.result_summary,
+        conflict_count=task.conflict_count,
+        event_count=task.event_count,
+        failed_event_count=task.failed_event_count,
+        batch_count=task.batch_count,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        completed_at=task.completed_at,
+        rerun_count=task.rerun_count,
+        last_rerun_at=task.last_rerun_at,
+        export_count=task.export_count,
+        last_export_at=task.last_export_at,
+        result=result_dict,
+    )
+
+
+@app.get("/api/verification/tasks", response_model=List[VerificationTaskOut])
+def list_verification_tasks(
+    status: Optional[str] = None,
+    task_type: Optional[str] = None,
+    order_no: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    q = db.query(VerificationTask).order_by(VerificationTask.id.desc())
+
+    if user.role != Role.ADMIN:
+        q = q.filter(VerificationTask.operator_id == user.id)
+
+    if status:
+        try:
+            q = q.filter(VerificationTask.status == VerificationStatus(status))
+        except ValueError:
+            pass
+    if task_type:
+        q = q.filter(VerificationTask.task_type == task_type)
+    if order_no:
+        q = q.filter(VerificationTask.target_order_no.contains(order_no))
+
+    tasks = q.limit(limit).all()
+    return [
+        VerificationTaskOut(
+            id=t.id,
+            task_no=t.task_no,
+            task_type=t.task_type,
+            target_order_no=t.target_order_no,
+            target_order_id=t.target_order_id,
+            target_batch_id=t.target_batch_id,
+            target_batch_no=t.target_batch_no,
+            status=t.status.value if hasattr(t.status, "value") else str(t.status),
+            operator_id=t.operator_id,
+            operator_name=t.operator_name,
+            result_summary=t.result_summary,
+            conflict_count=t.conflict_count,
+            event_count=t.event_count,
+            failed_event_count=t.failed_event_count,
+            batch_count=t.batch_count,
+            error_message=t.error_message,
+            created_at=t.created_at,
+            completed_at=t.completed_at,
+            rerun_count=t.rerun_count,
+            last_rerun_at=t.last_rerun_at,
+            export_count=t.export_count,
+            last_export_at=t.last_export_at,
+        )
+        for t in tasks
+    ]
+
+
+@app.get("/api/verification/tasks/{task_id}", response_model=VerificationTaskDetailOut)
+def get_verification_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    task = db.query(VerificationTask).filter(VerificationTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="校验任务不存在")
+
+    if user.role != Role.ADMIN and task.operator_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足：只能查看自己创建的校验任务")
+
+    result_dict = None
+    if task.result_json:
+        try:
+            result_dict = json.loads(task.result_json)
+        except Exception:
+            result_dict = None
+
+    return VerificationTaskDetailOut(
+        id=task.id,
+        task_no=task.task_no,
+        task_type=task.task_type,
+        target_order_no=task.target_order_no,
+        target_order_id=task.target_order_id,
+        target_batch_id=task.target_batch_id,
+        target_batch_no=task.target_batch_no,
+        status=task.status.value if hasattr(task.status, "value") else str(task.status),
+        operator_id=task.operator_id,
+        operator_name=task.operator_name,
+        result_summary=task.result_summary,
+        conflict_count=task.conflict_count,
+        event_count=task.event_count,
+        failed_event_count=task.failed_event_count,
+        batch_count=task.batch_count,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        completed_at=task.completed_at,
+        rerun_count=task.rerun_count,
+        last_rerun_at=task.last_rerun_at,
+        export_count=task.export_count,
+        last_export_at=task.last_export_at,
+        result=result_dict,
+    )
+
+
+@app.post("/api/verification/tasks/{task_id}/rerun", response_model=VerificationTaskDetailOut)
+def rerun_verification_task(
+    task_id: int,
+    data: RerunVerificationIn = RerunVerificationIn(),
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    task = db.query(VerificationTask).filter(VerificationTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="校验任务不存在")
+
+    if user.role != Role.ADMIN and task.operator_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    task.status = VerificationStatus.RUNNING
+    task.rerun_count = (task.rerun_count or 0) + 1
+    task.last_rerun_at = datetime.utcnow()
+    task.last_rerun_by_id = user.id
+    task.last_rerun_by_name = user.name
+    db.flush()
+
+    try:
+        if task.task_type == "order_trace" and task.target_order_id:
+            order = db.query(WorkOrder).filter(WorkOrder.id == task.target_order_id).first()
+            if not order:
+                order = db.query(WorkOrder).filter(WorkOrder.order_no == task.target_order_no).first()
+            if not order:
+                raise HTTPException(status_code=404, detail="关联工单已不存在")
+            result = _run_verification_for_order(db, order, user)
+        elif task.task_type == "batch_trace" and task.target_batch_id:
+            result = _run_verification_for_batch(db, task.target_batch_id, user)
+        else:
+            result = {}
+
+        summary = result.get("summary", {})
+        task.result_summary = (
+            f"事件数:{summary.get('total_events', 0)}, "
+            f"冲突数:{summary.get('conflict_count', 0)}, "
+            f"批次数:{summary.get('batch_count', 0)}"
+        )
+        task.result_json = json.dumps(result, ensure_ascii=False)
+        task.conflict_count = summary.get("conflict_count", 0)
+        task.event_count = summary.get("total_events", 0)
+        task.failed_event_count = summary.get("failed_count", 0)
+        task.batch_count = summary.get("batch_count", 0)
+        task.status = VerificationStatus.COMPLETED
+        task.completed_at = datetime.utcnow()
+        task.error_message = None
+
+        log = AuditLog(
+            action="verification_rerun",
+            operator_id=user.id,
+            operator_name=user.name,
+            target_type="verification_task",
+            target_id=task.task_no,
+            detail=f"重跑校验任务 {task.task_no}，原因={data.reason}，"
+                   f"第{task.rerun_count}次重跑",
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(task)
+
+    except Exception as e:
+        task.status = VerificationStatus.FAILED
+        task.error_message = str(e)
+        db.commit()
+        db.refresh(task)
+
+    result_dict = None
+    if task.result_json:
+        try:
+            result_dict = json.loads(task.result_json)
+        except Exception:
+            result_dict = None
+
+    return VerificationTaskDetailOut(
+        id=task.id,
+        task_no=task.task_no,
+        task_type=task.task_type,
+        target_order_no=task.target_order_no,
+        target_order_id=task.target_order_id,
+        target_batch_id=task.target_batch_id,
+        target_batch_no=task.target_batch_no,
+        status=task.status.value if hasattr(task.status, "value") else str(task.status),
+        operator_id=task.operator_id,
+        operator_name=task.operator_name,
+        result_summary=task.result_summary,
+        conflict_count=task.conflict_count,
+        event_count=task.event_count,
+        failed_event_count=task.failed_event_count,
+        batch_count=task.batch_count,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        completed_at=task.completed_at,
+        rerun_count=task.rerun_count,
+        last_rerun_at=task.last_rerun_at,
+        export_count=task.export_count,
+        last_export_at=task.last_export_at,
+        result=result_dict,
+    )
+
+
+@app.get("/api/verification/tasks/{task_id}/export/json")
+def export_verification_json(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    if not _get_config_value(db, "verification_export_enabled", True):
+        raise HTTPException(status_code=403, detail="校验导出功能已被管理员禁用")
+
+    task = db.query(VerificationTask).filter(VerificationTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="校验任务不存在")
+
+    if user.role != Role.ADMIN and task.operator_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if not task.result_json:
+        raise HTTPException(status_code=400, detail="校验任务无结果数据")
+
+    try:
+        result = json.loads(task.result_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"结果解析失败: {e}")
+
+    task.export_count = (task.export_count or 0) + 1
+    task.last_export_at = datetime.utcnow()
+    task.last_export_by_id = user.id
+    task.last_export_by_name = user.name
+
+    audit_pkg = _build_audit_package(task, result, user)
+    content = json.dumps(audit_pkg, ensure_ascii=False, indent=2).encode("utf-8")
+
+    log = AuditLog(
+        action="verification_export",
+        operator_id=user.id,
+        operator_name=user.name,
+        target_type="verification_task",
+        target_id=task.task_no,
+        detail=f"导出校验任务 {task.task_no} 的审计包（JSON），第{task.export_count}次导出",
+    )
+    db.add(log)
+    db.commit()
+
+    resp = StreamingResponse(
+        iter([content]),
+        media_type="application/json; charset=utf-8",
+    )
+    fname = f"verification_audit_{task.task_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@app.get("/api/verification/tasks/{task_id}/export/csv")
+def export_verification_csv(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    if not _get_config_value(db, "verification_export_enabled", True):
+        raise HTTPException(status_code=403, detail="校验导出功能已被管理员禁用")
+
+    task = db.query(VerificationTask).filter(VerificationTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="校验任务不存在")
+
+    if user.role != Role.ADMIN and task.operator_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if not task.result_json:
+        raise HTTPException(status_code=400, detail="校验任务无结果数据")
+
+    try:
+        result = json.loads(task.result_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"结果解析失败: {e}")
+
+    events = result.get("events", [])
+    if not events and task.task_type == "batch_trace":
+        events = result.get("all_events", [])
+
+    rows = []
+    for idx, e in enumerate(events):
+        rows.append({
+            "seq": idx + 1,
+            "event_time": e.get("created_at", ""),
+            "event_type": e.get("event_type", ""),
+            "event_label": e.get("event_label", ""),
+            "operator_id": e.get("operator_id", ""),
+            "operator_name": e.get("operator_name", ""),
+            "operator_role": e.get("operator_role", ""),
+            "from_status": e.get("from_status", ""),
+            "to_status": e.get("to_status", ""),
+            "changed_fields": ", ".join(e.get("changed_fields", [])) if e.get("changed_fields") else "",
+            "is_batch_operation": "是" if e.get("is_batch_operation") else "否",
+            "batch_no": e.get("batch_no", "") if task.task_type != "order_trace" or result.get("can_see_batch_detail") else "",
+            "success": "成功" if e.get("success") else "失败",
+            "fail_reason": e.get("fail_reason", "") if e.get("success") is False else "",
+            "note": e.get("note", ""),
+        })
+
+    task.export_count = (task.export_count or 0) + 1
+    task.last_export_at = datetime.utcnow()
+    task.last_export_by_id = user.id
+    task.last_export_by_name = user.name
+
+    log = AuditLog(
+        action="verification_export",
+        operator_id=user.id,
+        operator_name=user.name,
+        target_type="verification_task",
+        target_id=task.task_no,
+        detail=f"导出校验任务 {task.task_no} 的审计包（CSV），第{task.export_count}次导出",
+    )
+    db.add(log)
+    db.commit()
+
+    if not rows:
+        headers = []
+    else:
+        headers = list(rows[0].keys())
+
+    buf = io.StringIO(newline="")
+    writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+
+    header_lines = [
+        ["task_no", task.task_no],
+        ["task_type", task.task_type],
+        ["target_order_no", task.target_order_no or ""],
+        ["target_batch_no", task.target_batch_no or ""],
+        ["created_at", task.created_at.isoformat() if task.created_at else ""],
+        ["completed_at", task.completed_at.isoformat() if task.completed_at else ""],
+        ["rerun_count", str(task.rerun_count)],
+        ["export_count", str(task.export_count)],
+        ["event_count", str(task.event_count)],
+        ["conflict_count", str(task.conflict_count)],
+        ["exported_by", user.name],
+        ["exported_at", datetime.utcnow().isoformat()],
+        [],
+    ]
+    header_buf = io.StringIO(newline="")
+    hw = csv.writer(header_buf)
+    for hl in header_lines:
+        hw.writerow(hl)
+
+    content = (header_buf.getvalue() + buf.getvalue()).encode("utf-8-sig")
+    resp = StreamingResponse(
+        iter([content]),
+        media_type="text/csv; charset=utf-8",
+    )
+    fname = f"verification_audit_{task.task_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@app.get("/api/verification/cleanup")
+def cleanup_verification_tasks(
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    count = _cleanup_expired_verifications(db)
+    log = AuditLog(
+        action="verification_cleanup",
+        operator_id=user.id,
+        operator_name=user.name,
+        target_type="verification_task",
+        target_id="all",
+        detail=f"清理过期校验任务，共清理 {count} 条",
+    )
+    db.add(log)
+    db.commit()
+    return {"cleaned": count}
+
+
+# ---- System Config APIs ----
+
+@app.get("/api/system/configs", response_model=List[SystemConfigOut])
+def list_system_configs(
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    configs = db.query(SystemConfig).order_by(SystemConfig.id).all()
+    return configs
+
+
+@app.get("/api/system/configs/{config_key}", response_model=SystemConfigOut)
+def get_system_config(
+    config_key: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    cfg = db.query(SystemConfig).filter(SystemConfig.config_key == config_key).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="配置项不存在")
+    return cfg
+
+
+@app.put("/api/system/configs/{config_key}", response_model=SystemConfigOut)
+def update_system_config(
+    config_key: str,
+    data: UpdateSystemConfigIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(_current_user),
+):
+    _require_role(user, Role.ADMIN)
+    cfg = db.query(SystemConfig).filter(SystemConfig.config_key == config_key).first()
+    if not cfg:
+        raise HTTPException(status_code=404, detail="配置项不存在")
+
+    if cfg.config_type == "int":
+        try:
+            int(data.config_value)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="值必须为整数")
+    elif cfg.config_type == "bool":
+        if str(data.config_value).lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+            raise HTTPException(status_code=400, detail="值必须为布尔值 (true/false)")
+
+    cfg.config_value = data.config_value
+    cfg.updated_by = user.name
+    db.commit()
+    db.refresh(cfg)
+
+    log = AuditLog(
+        action="system_config_update",
+        operator_id=user.id,
+        operator_name=user.name,
+        target_type="system_config",
+        target_id=config_key,
+        detail=f"修改系统配置 {config_key} = {data.config_value}",
+    )
+    db.add(log)
+    db.commit()
+
+    return cfg

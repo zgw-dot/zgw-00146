@@ -683,6 +683,173 @@
     color: #8893a7;
   }
   .detail-wide { max-width: 880px !important; }
+
+  /* ===== Verification Console ===== */
+  .vfy-modal { max-width: 1100px !important; }
+  .vfy-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e4e8ef;
+    margin-bottom: 16px;
+  }
+  .vfy-tab {
+    padding: 10px 20px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: #5a6780;
+    font-weight: 500;
+  }
+  .vfy-tab.active {
+    color: #2f8f5f;
+    border-bottom-color: #2f8f5f;
+  }
+
+  .vfy-toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    align-items: center;
+  }
+  .vfy-toolbar input, .vfy-toolbar select {
+    padding: 6px 10px;
+    border: 1px solid #d7dde7;
+    border-radius: 6px;
+    font-size: 12.5px;
+    background: #f9fafc;
+  }
+  .vfy-toolbar .btn { padding: 6px 14px; font-size: 12.5px; }
+
+  .vfy-task-list {
+    max-height: 420px;
+    overflow: auto;
+    border: 1px solid #eef1f6;
+    border-radius: 8px;
+  }
+  .vfy-task-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid #eef1f6;
+    cursor: pointer;
+    transition: background .15s;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .vfy-task-item:hover { background: #f9fafc; }
+  .vfy-task-item:last-child { border-bottom: none; }
+  .vfy-task-main { flex: 1; min-width: 0; }
+  .vfy-task-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: #2b3445;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .vfy-task-meta {
+    font-size: 12px;
+    color: #8893a7;
+    margin-top: 4px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .vfy-task-stats {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .vfy-stat-chip {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #f4f6fa;
+    color: #5a6780;
+  }
+  .vfy-stat-chip.warn { background: #fff3cd; color: #856404; }
+  .vfy-stat-chip.danger { background: #fad4d3; color: #a9312e; }
+  .vfy-stat-chip.info { background: #cfe2ff; color: #084298; }
+
+  .vfy-status-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .vfy-status-pending { background: #e8ecef; color: #5a6780; }
+  .vfy-status-running { background: #cfe2ff; color: #084298; }
+  .vfy-status-completed { background: #d5f0e2; color: #1d7c4c; }
+  .vfy-status-failed { background: #fad4d3; color: #a9312e; }
+
+  .vfy-detail-header {
+    background: #f9fafc;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+  }
+  .vfy-detail-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2b3445;
+    margin-bottom: 6px;
+  }
+  .vfy-detail-meta {
+    font-size: 12px;
+    color: #8893a7;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .vfy-conflict-list {
+    margin-bottom: 14px;
+  }
+  .vfy-conflict-item {
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .vfy-conflict-item.high { background: #fdecea; border-left: 3px solid #d9534f; }
+  .vfy-conflict-item.medium { background: #fff8e1; border-left: 3px solid #f39c12; }
+  .vfy-conflict-item.warning { background: #fff3cd; border-left: 3px solid #e67e22; }
+  .vfy-conflict-item.info { background: #e8f4fd; border-left: 3px solid #3498db; }
+  .vfy-conflict-icon { font-size: 14px; flex-shrink: 0; line-height: 1.4; }
+  .vfy-conflict-text { flex: 1; font-size: 12.5px; color: #445068; }
+  .vfy-conflict-text .ctitle { font-weight: 600; margin-bottom: 2px; }
+
+  .vfy-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .vfy-empty {
+    padding: 50px 20px;
+    text-align: center;
+    color: #8893a7;
+    background: #fafbfd;
+    border-radius: 8px;
+    border: 1px dashed #e4e8ef;
+  }
+
+  .vfy-type-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #e8d9f5;
+    color: #5a2a8e;
+  }
 </style>
 </head>
 <body>
@@ -705,6 +872,7 @@
     <button class="btn btn-ghost" onclick="exportJson()">⬇ 导出 JSON</button>
     <button class="btn btn-ghost" id="btnSnapRestore" onclick="openSnapshotModal()" style="display:none;">📦 快照恢复</button>
     <button class="btn btn-ghost" id="btnBatchHistory" onclick="openBatchHistoryModal()" style="display:none;">📜 恢复批次</button>
+    <button class="btn btn-secondary" id="btnVerification" onclick="openVerificationConsole()" style="display:none;">🔍 工单校验台</button>
   </div>
 </header>
 
@@ -885,6 +1053,48 @@
   </div>
 </div>
 
+<!-- 校验台 Modal -->
+<div class="modal-mask" id="verificationModal">
+  <div class="modal vfy-modal">
+    <header><h2>🔍 工单历史校验台</h2></header>
+    <div class="modal-body" id="verificationBody" style="min-height:300px;"></div>
+    <div class="modal-footer" id="verificationFooter">
+      <button class="btn btn-ghost" onclick="closeModal('verificationModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建校验任务 Modal -->
+<div class="modal-mask" id="createVfyModal">
+  <div class="modal" style="max-width:480px;">
+    <header><h2>➕ 新建校验任务</h2></header>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>校验类型<span class="req">*</span></label>
+        <select id="vfyType" onchange="onVfyTypeChange()">
+          <option value="order_trace">按工单校验</option>
+          <option value="batch_trace">按批次校验（仅管理员）</option>
+        </select>
+      </div>
+      <div class="form-row" id="vfyOrderRow">
+        <label>工单号<span class="req">*</span></label>
+        <input id="vfyOrderNo" placeholder="输入工单号，如 WO2024..." />
+      </div>
+      <div class="form-row" id="vfyBatchRow" style="display:none;">
+        <label>批次号<span class="req">*</span></label>
+        <input id="vfyBatchNo" placeholder="输入批次号，如 RST-..." />
+      </div>
+      <div class="hint" style="font-size:11.5px;color:#8893a7;">
+        校验任务将分析工单从创建到关闭的完整历史链路，包括快照导入、人工改派、批次撤销等操作。
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('createVfyModal')">取消</button>
+      <button class="btn btn-primary" onclick="submitCreateVfy()">✅ 创建校验</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-wrap"></div>
 
 <script>
@@ -956,6 +1166,7 @@ async function onRoleChange() {
       $id("btnReport").style.display = state.currentUser.role === "inspector" ? "inline-block" : "none";
       $id("btnSnapRestore").style.display = state.currentUser.role === "admin" ? "inline-block" : "none";
       $id("btnBatchHistory").style.display = state.currentUser.role === "admin" ? "inline-block" : "none";
+      $id("btnVerification").style.display = state.currentUserId ? "inline-block" : "none";
     } catch (e) {}
   } else {
     state.currentUser = null;
@@ -2147,6 +2358,399 @@ async function confirmRevokeBatch() {
     loadBatchList();
     loadAll();
   } catch (e) {}
+}
+
+// ========== Verification Console ==========
+const vfyState = {
+  currentTab: "list",
+  tasks: [],
+  currentTaskId: null,
+  currentTask: null,
+  filterStatus: "",
+  filterType: "",
+  searchOrderNo: "",
+};
+
+function openVerificationConsole() {
+  if (!state.currentUserId) {
+    toast("请先登录", "err");
+    return;
+  }
+  vfyState.currentTab = "list";
+  vfyState.currentTaskId = null;
+  vfyState.currentTask = null;
+  vfyState.filterStatus = "";
+  vfyState.filterType = "";
+  vfyState.searchOrderNo = "";
+  renderVerificationConsole();
+  loadVfyTaskList();
+  openModal("verificationModal");
+}
+
+function renderVerificationConsole() {
+  const body = $id("verificationBody");
+  let html = `<div class="vfy-tabs">
+    <div class="vfy-tab ${vfyState.currentTab === 'list' ? 'active' : ''}" onclick="switchVfyTab('list')">📋 校验任务</div>
+    ${vfyState.currentTaskId ? `<div class="vfy-tab ${vfyState.currentTab === 'detail' ? 'active' : ''}" onclick="switchVfyTab('detail')">🔍 校验详情</div>` : ""}
+  </div>`;
+
+  if (vfyState.currentTab === "list") {
+    html += renderVfyListTab();
+  } else if (vfyState.currentTab === "detail") {
+    html += renderVfyDetailTab();
+  }
+
+  body.innerHTML = html;
+}
+
+function switchVfyTab(tab) {
+  vfyState.currentTab = tab;
+  renderVerificationConsole();
+}
+
+function renderVfyListTab() {
+  let html = `<div class="vfy-toolbar">
+    <input id="vfySearch" placeholder="🔍 搜索工单号..." oninput="onVfySearchChange()" value="${vfyState.searchOrderNo}" />
+    <select id="vfyStatusFilter" onchange="onVfyStatusChange()">
+      <option value="">全部状态</option>
+      <option value="completed">已完成</option>
+      <option value="running">运行中</option>
+      <option value="failed">失败</option>
+      <option value="pending">等待中</option>
+    </select>
+    <select id="vfyTypeFilter" onchange="onVfyFilterTypeChange()">
+      <option value="">全部类型</option>
+      <option value="order_trace">工单校验</option>
+      <option value="batch_trace">批次校验</option>
+    </select>
+    <div style="flex:1"></div>
+    <button class="btn btn-primary" onclick="openCreateVfyModal()">➕ 新建校验</button>
+    <button class="btn btn-ghost" onclick="refreshVfyList()">🔄 刷新</button>
+  </div>`;
+
+  const tasks = vfyState.tasks || [];
+  if (tasks.length === 0) {
+    html += `<div class="vfy-empty">暂无校验任务，点击「新建校验」开始</div>`;
+  } else {
+    html += `<div class="vfy-task-list">`;
+    tasks.forEach(t => {
+      const statusCls = "vfy-status-" + (t.status || "pending");
+      const statusLabel = {
+        pending: "等待中", running: "运行中", completed: "已完成", failed: "失败"
+      }[t.status] || t.status;
+
+      const typeLabel = t.task_type === "batch_trace" ? "批次校验" : "工单校验";
+      const target = t.target_order_no || t.target_batch_no || "未知";
+
+      html += `<div class="vfy-task-item" onclick="openVfyDetail(${t.id})">
+        <div class="vfy-task-main">
+          <div class="vfy-task-title">
+            <span class="vfy-type-tag">${typeLabel}</span>
+            <span>${target}</span>
+            <span class="vfy-status-tag ${statusCls}">${statusLabel}</span>
+          </div>
+          <div class="vfy-task-meta">
+            <span>任务编号: ${t.task_no}</span>
+            <span>创建人: ${t.operator_name || "-"}</span>
+            <span>创建: ${fmtTime(t.created_at)}</span>
+            ${t.rerun_count > 0 ? `<span>重跑: ${t.rerun_count}次</span>` : ""}
+            ${t.export_count > 0 ? `<span>导出: ${t.export_count}次</span>` : ""}
+          </div>
+        </div>
+        <div class="vfy-task-stats">
+          <span class="vfy-stat-chip info">${t.event_count || 0} 事件</span>
+          ${t.conflict_count > 0 ? `<span class="vfy-stat-chip warn">${t.conflict_count} 冲突</span>` : ""}
+          ${t.failed_event_count > 0 ? `<span class="vfy-stat-chip danger">${t.failed_event_count} 失败</span>` : ""}
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  return html;
+}
+
+function renderVfyDetailTab() {
+  const task = vfyState.currentTask;
+  if (!task) {
+    return `<div class="vfy-empty">加载中...</div>`;
+  }
+
+  const result = task.result || {};
+  const conflicts = result.conflicts || (result.all_conflicts || []);
+  const events = result.events || (result.all_events || []);
+  const summary = result.summary || {};
+  const order = result.order || {};
+  const canSeeBatch = result.can_see_batch_detail !== false;
+
+  const typeLabel = task.task_type === "batch_trace" ? "批次校验" : "工单校验";
+  const target = task.target_order_no || task.target_batch_no || "未知";
+  const statusLabel = {
+    pending: "等待中", running: "运行中", completed: "已完成", failed: "失败"
+  }[task.status] || task.status;
+  const statusCls = "vfy-status-" + (task.status || "pending");
+
+  let html = `<div class="vfy-detail-header">
+    <div class="vfy-detail-title">
+      <span class="vfy-type-tag">${typeLabel}</span>
+      ${target}
+      <span class="vfy-status-tag ${statusCls}">${statusLabel}</span>
+    </div>
+    <div class="vfy-detail-meta">
+      <span>任务编号: ${task.task_no}</span>
+      <span>创建人: ${task.operator_name || "-"}</span>
+      <span>创建时间: ${fmtTime(task.created_at)}</span>
+      <span>完成时间: ${fmtTime(task.completed_at)}</span>
+      ${task.rerun_count > 0 ? `<span>重跑次数: ${task.rerun_count}次</span>` : ""}
+      ${task.last_rerun_at ? `<span>上次重跑: ${fmtTime(task.last_rerun_at)}</span>` : ""}
+      ${task.export_count > 0 ? `<span>导出次数: ${task.export_count}次</span>` : ""}
+    </div>
+  </div>`;
+
+  html += `<div class="vfy-actions" style="margin-bottom:14px;">
+    <button class="btn btn-secondary" onclick="rerunVfyTask()">🔄 重新校验</button>
+    <button class="btn btn-warn" onclick="exportVfyJson()">⬇ 导出 JSON 审计包</button>
+    <button class="btn btn-warn" onclick="exportVfyCsv()">⬇ 导出 CSV</button>
+    <button class="btn btn-ghost" onclick="switchVfyTab('list')">← 返回列表</button>
+  </div>`;
+
+  if (conflicts && conflicts.length > 0) {
+    html += `<h4 style="margin:0 0 8px;font-size:14px;color:#445068;">⚠ 冲突告警 (${conflicts.length})</h4>`;
+    html += `<div class="vfy-conflict-list">`;
+    conflicts.forEach(c => {
+      const sev = c.severity || "info";
+      const icons = { high: "⛔", medium: "⚠️", warning: "⚡", info: "ℹ️" };
+      const titles = {
+        failed_event: "操作失败",
+        revoke_skip: "撤销跳过",
+        snapshot_override: "快照覆盖",
+        multiple_batch_ops: "多次批量操作",
+        status_regression: "状态倒退",
+        order_missing: "工单缺失",
+      };
+      html += `<div class="vfy-conflict-item ${sev}">
+        <div class="vfy-conflict-icon">${icons[sev] || "ℹ️"}</div>
+        <div class="vfy-conflict-text">
+          <div class="ctitle">${titles[c.type] || c.type || "冲突"} ${c.order_no ? `(${c.order_no})` : ""}</div>
+          <div>${c.message || ""}</div>
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `<h4 style="margin:12px 0 8px;font-size:14px;color:#445068;">📊 校验概览</h4>`;
+  html += `<div class="snap-summary" style="margin-bottom:14px;">
+    <div class="ss-item"><span class="ss-num">${summary.total_events || events.length || 0}</span><div class="ss-label">总事件数</div></div>
+    <div class="ss-item"><span class="ss-num" style="color:#1d7c4c;">${summary.success_count || 0}</span><div class="ss-label">成功</div></div>
+    ${summary.failed_count > 0 ? `<div class="ss-item"><span class="ss-num" style="color:#d9534f;">${summary.failed_count}</span><div class="ss-label">失败</div></div>` : ""}
+    ${summary.batch_count > 0 ? `<div class="ss-item"><span class="ss-num" style="color:#8e44ad;">${summary.batch_count}</span><div class="ss-label">关联批次</div></div>` : ""}
+    ${summary.conflict_count > 0 ? `<div class="ss-item"><span class="ss-num" style="color:#e67e22;">${summary.conflict_count}</span><div class="ss-label">冲突数</div></div>` : ""}
+    ${summary.total_orders ? `<div class="ss-item"><span class="ss-num">${summary.total_orders}</span><div class="ss-label">工单数量</div></div>` : ""}
+  </div>`;
+
+  if (task.task_type === "order_trace" && order) {
+    html += `<h4 style="margin:0 0 8px;font-size:14px;color:#445068;">📋 工单信息</h4>`;
+    html += `<div class="meta" style="grid-template-columns:1fr 1fr;gap:6px 16px;font-size:12.5px;margin-bottom:14px;background:#f9fafc;padding:10px 14px;border-radius:6px;">
+      <div><span class="k">工单号：</span><strong>${order.order_no || "-"}</strong></div>
+      <div><span class="k">当前状态：</span>${order.current_status || "-"}</div>
+      <div><span class="k">道路：</span>${order.road || "-"}</div>
+      <div><span class="k">树木编号：</span>${order.tree_no || "-"}</div>
+      <div><span class="k">风险等级：</span>${order.risk_level || "-"}</div>
+      <div><span class="k">上报人：</span>${order.reporter_name || "-"}</div>
+    </div>`;
+  }
+
+  if (!canSeeBatch) {
+    html += `<div style="padding:8px 12px;background:#fff8e1;border-radius:6px;font-size:12px;color:#856404;margin-bottom:12px;">
+      ⚠ 您是巡查员，已隐藏批量操作的详细信息。管理员可见完整内容。
+    </div>`;
+  }
+
+  html += `<h4 style="margin:12px 0 8px;font-size:14px;color:#445068;">⏱ 时间线 (${events.length})</h4>`;
+  html += `<div class="trace-timeline">`;
+  if (events.length === 0) {
+    html += `<div class="trace-empty">暂无事件记录</div>`;
+  } else {
+    events.forEach((e, idx) => {
+      let badgeCls = "";
+      if (!e.success) badgeCls += " fail";
+      if (e.is_batch_operation) badgeCls += " batch";
+
+      const typeCls = _getEventTypeTagClass(e.event_type);
+
+      html += `<div class="trace-event${badgeCls}">
+        <div class="trace-event-head">
+          <div class="trace-event-title">
+            <span class="trace-event-tag ${typeCls}">${e.event_label}</span>
+            ${e.is_batch_operation && canSeeBatch ? `<span class="trace-event-tag t-tag-type-snapshot">批量操作</span>` : ""}
+            ${!e.success ? `<span class="trace-event-tag t-tag-type-cancel">失败</span>` : ""}
+            <span>${e.from_status || "创建"} → ${e.to_status || "已删除"}</span>
+          </div>
+          <div class="trace-event-meta">
+            ${fmtTime(e.created_at)}
+            ${e.operator_name ? ` · ${e.operator_name}` : ""}
+            ${e.operator_role ? `（${e.operator_role === "admin" ? "管理员" : "巡查员"}）` : ""}
+          </div>
+        </div>
+        <div class="trace-event-body">`;
+
+      if (e.changed_fields && e.changed_fields.length > 0 && (canSeeBatch || !e.is_batch_operation)) {
+        html += `<div class="changed-fields">变更字段：${e.changed_fields.map(f => `<span>${f}</span>`).join("")}</div>`;
+      }
+      if (e.batch_no && canSeeBatch) {
+        html += `<div class="batch-info">📦 所属批次：${e.batch_no}</div>`;
+      }
+      if (e.note) {
+        html += `<div class="note-text">📝 ${e.note}</div>`;
+      }
+      if (!e.success && e.fail_reason && (canSeeBatch || !e.is_batch_operation)) {
+        html += `<div class="fail-text">❌ ${e.fail_reason}</div>`;
+      }
+      if (e.diffs && e.diffs.length > 0 && (canSeeBatch || !e.is_batch_operation)) {
+        html += `<div class="diff-toggle" onclick="toggleVfyDiff(${idx})">▸ 查看字段差异 (${e.diffs.length})</div>
+          <div class="diff-panel" id="vfyDiffPanel${idx}" style="display:none;">
+            <table>
+              <thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead>
+              <tbody>
+                ${e.diffs.map(d => `<tr>
+                  <td class="field">${d.field}</td>
+                  <td class="before">${_formatVal(d.before)}</td>
+                  <td class="after">${_formatVal(d.after)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`;
+      }
+      html += `</div></div>`;
+    });
+  }
+  html += `</div>`;
+
+  return html;
+}
+
+function toggleVfyDiff(idx) {
+  const p = $id("vfyDiffPanel" + idx);
+  if (!p) return;
+  p.style.display = p.style.display === "none" ? "block" : "none";
+}
+
+async function loadVfyTaskList() {
+  try {
+    let url = "/verification/tasks?limit=50";
+    if (vfyState.filterStatus) url += `&status=${encodeURIComponent(vfyState.filterStatus)}`;
+    if (vfyState.filterType) url += `&task_type=${encodeURIComponent(vfyState.filterType)}`;
+    if (vfyState.searchOrderNo) url += `&order_no=${encodeURIComponent(vfyState.searchOrderNo)}`;
+    vfyState.tasks = await api(url);
+    renderVerificationConsole();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function onVfySearchChange() {
+  vfyState.searchOrderNo = $id("vfySearch").value.trim();
+  loadVfyTaskList();
+}
+
+function onVfyStatusChange() {
+  vfyState.filterStatus = $id("vfyStatusFilter").value;
+  loadVfyTaskList();
+}
+
+function onVfyFilterTypeChange() {
+  vfyState.filterType = $id("vfyTypeFilter").value;
+  loadVfyTaskList();
+}
+
+function refreshVfyList() {
+  loadVfyTaskList();
+  toast("已刷新");
+}
+
+function openCreateVfyModal() {
+  $id("vfyOrderNo").value = "";
+  $id("vfyBatchNo").value = "";
+  $id("vfyType").value = "order_trace";
+  $id("vfyOrderRow").style.display = "block";
+  $id("vfyBatchRow").style.display = "none";
+
+  if (state.currentUser && state.currentUser.role !== "admin") {
+    $id("vfyType").querySelector('option[value="batch_trace"]').disabled = true;
+  }
+
+  openModal("createVfyModal");
+}
+
+function onVfyTypeChange() {
+  const type = $id("vfyType").value;
+  $id("vfyOrderRow").style.display = type === "order_trace" ? "block" : "none";
+  $id("vfyBatchRow").style.display = type === "batch_trace" ? "block" : "none";
+}
+
+async function submitCreateVfy() {
+  const type = $id("vfyType").value;
+  try {
+    const payload = { task_type: type };
+    if (type === "order_trace") {
+      const orderNo = $id("vfyOrderNo").value.trim();
+      if (!orderNo) {
+        toast("请输入工单号", "err");
+        return;
+      }
+      payload.order_no = orderNo;
+    } else if (type === "batch_trace") {
+      const batchNo = $id("vfyBatchNo").value.trim();
+      if (!batchNo) {
+        toast("请输入批次号", "err");
+        return;
+      }
+      payload.batch_no = batchNo;
+    }
+
+    const result = await api("/verification/tasks", "POST", payload);
+    closeModal("createVfyModal");
+    toast("✅ 校验任务创建成功");
+    vfyState.currentTask = result;
+    vfyState.currentTaskId = result.id;
+    vfyState.currentTab = "detail";
+    loadVfyTaskList();
+    renderVerificationConsole();
+  } catch (e) {}
+}
+
+async function openVfyDetail(taskId) {
+  try {
+    const task = await api(`/verification/tasks/${taskId}`);
+    vfyState.currentTask = task;
+    vfyState.currentTaskId = taskId;
+    vfyState.currentTab = "detail";
+    renderVerificationConsole();
+  } catch (e) {}
+}
+
+async function rerunVfyTask() {
+  if (!vfyState.currentTaskId) return;
+  const reason = prompt("请输入重跑原因（可留空）：", "手动重新校验");
+  if (reason === null) return;
+  try {
+    const result = await api(`/verification/tasks/${vfyState.currentTaskId}/rerun`, "POST", { reason: reason || "手动重跑" });
+    vfyState.currentTask = result;
+    toast("✅ 重新校验完成");
+    loadVfyTaskList();
+    renderVerificationConsole();
+  } catch (e) {}
+}
+
+function exportVfyJson() {
+  if (!vfyState.currentTaskId) return;
+  downloadWithAuth(`/verification/tasks/${vfyState.currentTaskId}/export/json`, `verification_${vfyState.currentTaskId}.json`);
+}
+
+function exportVfyCsv() {
+  if (!vfyState.currentTaskId) return;
+  downloadWithAuth(`/verification/tasks/${vfyState.currentTaskId}/export/csv`, `verification_${vfyState.currentTaskId}.csv`);
 }
 
 // ---------- start ----------

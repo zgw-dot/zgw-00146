@@ -259,6 +259,55 @@ class RestoreBatchItem(Base):
     batch = relationship("RestoreBatch", back_populates="items")
 
 
+class VerificationStatus(str, PyEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class VerificationTask(Base):
+    __tablename__ = "verification_tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    task_no = Column(String(50), unique=True, nullable=False, index=True)
+    task_type = Column(String(30), nullable=False, default="order_trace")
+    target_order_no = Column(String(30), index=True)
+    target_order_id = Column(Integer, index=True)
+    target_batch_id = Column(Integer, index=True)
+    target_batch_no = Column(String(50), index=True)
+    status = Column(SAEnum(VerificationStatus), default=VerificationStatus.PENDING, nullable=False, index=True)
+    operator_id = Column(Integer, nullable=False)
+    operator_name = Column(String(100))
+    result_summary = Column(Text)
+    result_json = Column(Text)
+    conflict_count = Column(Integer, default=0)
+    event_count = Column(Integer, default=0)
+    failed_event_count = Column(Integer, default=0)
+    batch_count = Column(Integer, default=0)
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    completed_at = Column(DateTime)
+    rerun_count = Column(Integer, default=0)
+    last_rerun_at = Column(DateTime)
+    last_rerun_by_id = Column(Integer)
+    last_rerun_by_name = Column(String(100))
+    export_count = Column(Integer, default=0)
+    last_export_at = Column(DateTime)
+    last_export_by_id = Column(Integer)
+    last_export_by_name = Column(String(100))
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+    id = Column(Integer, primary_key=True, index=True)
+    config_key = Column(String(100), unique=True, nullable=False, index=True)
+    config_value = Column(Text)
+    config_type = Column(String(20), default="string")
+    description = Column(String(200))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(100))
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -335,10 +384,105 @@ def _ensure_order_traces_table():
         db.close()
 
 
+def _ensure_verification_tables():
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        result = db.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='verification_tasks'")).fetchone()
+        if not result:
+            db.execute(text("""
+                CREATE TABLE verification_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_no VARCHAR(50) NOT NULL UNIQUE,
+                    task_type VARCHAR(30) NOT NULL DEFAULT 'order_trace',
+                    target_order_no VARCHAR(30),
+                    target_order_id INTEGER,
+                    target_batch_id INTEGER,
+                    target_batch_no VARCHAR(50),
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    operator_id INTEGER NOT NULL,
+                    operator_name VARCHAR(100),
+                    result_summary TEXT,
+                    result_json TEXT,
+                    conflict_count INTEGER DEFAULT 0,
+                    event_count INTEGER DEFAULT 0,
+                    failed_event_count INTEGER DEFAULT 0,
+                    batch_count INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME,
+                    rerun_count INTEGER DEFAULT 0,
+                    last_rerun_at DATETIME,
+                    last_rerun_by_id INTEGER,
+                    last_rerun_by_name VARCHAR(100),
+                    export_count INTEGER DEFAULT 0,
+                    last_export_at DATETIME,
+                    last_export_by_id INTEGER,
+                    last_export_by_name VARCHAR(100)
+                )
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_id ON verification_tasks(id)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_task_no ON verification_tasks(task_no)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_target_order_no ON verification_tasks(target_order_no)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_target_order_id ON verification_tasks(target_order_id)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_target_batch_id ON verification_tasks(target_batch_id)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_status ON verification_tasks(status)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_verification_tasks_created_at ON verification_tasks(created_at)"))
+
+        result = db.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='system_configs'")).fetchone()
+        if not result:
+            db.execute(text("""
+                CREATE TABLE system_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    config_key VARCHAR(100) NOT NULL UNIQUE,
+                    config_value TEXT,
+                    config_type VARCHAR(20) DEFAULT 'string',
+                    description VARCHAR(200),
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_by VARCHAR(100)
+                )
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_system_configs_id ON system_configs(id)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_system_configs_config_key ON system_configs(config_key)"))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _init_default_configs():
+    db = SessionLocal()
+    try:
+        defaults = [
+            ("verification_retention_days", "30", "int", "校验任务保留天数，超过此天数的任务将被清理"),
+            ("verification_export_enabled", "true", "bool", "校验结果导出功能开关"),
+            ("verification_auto_clean_enabled", "true", "bool", "校验任务自动清理开关"),
+            ("trace_retention_days", "90", "int", "工单追溯记录保留天数"),
+        ]
+        for key, value, type_, desc in defaults:
+            existing = db.query(SystemConfig).filter(SystemConfig.config_key == key).first()
+            if not existing:
+                db.add(SystemConfig(
+                    config_key=key,
+                    config_value=value,
+                    config_type=type_,
+                    description=desc,
+                    updated_by="system_init",
+                ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_restore_batch_items()
     _ensure_order_traces_table()
+    _ensure_verification_tables()
+    _init_default_configs()
     db = SessionLocal()
     try:
         if not db.query(User).filter(User.username == "admin").first():
